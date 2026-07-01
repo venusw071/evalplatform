@@ -4,3 +4,4 @@ __pycache__/
 tmp/
 eval-demo/tmp/
 eval-demo/eval_demo.sqlite3
+eval-demo/reports/

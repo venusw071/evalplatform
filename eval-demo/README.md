@@ -23,6 +23,7 @@ http://127.0.0.1:8000
 - Mock or OpenAI-backed target model calls that store outputs, traces, latency, pass rate, baseline delta, and scorer rationales.
 - Working LLM-as-Judge flow with five editable scorers, judge model/checkpoint selection, no-key local judges, OpenAI execution, saved judge scores, and judge-run editing/deletion.
 - Versioned judge prompt definitions stored in `eval-demo/judges/*.json`.
+- GitHub Action that automatically runs the Completeness judge when versioned datasets change.
 - Playground for testing local no-key or OpenAI checkpoints with a system prompt and user input.
 - Dashboard with recent run/model selection, focused run drilldown, score trends, and regression signals.
 - Run drilldown with example-level expected output, model output, tags, and scorer results.
@@ -116,3 +117,22 @@ CSV files should use headers such as:
 input,expected,tags
 Summarize this policy.,Two concise bullets.,"instruction-following,support"
 ```
+
+## Where Datasets Should Live
+
+For local product demos, uploaded datasets live in local SQLite. This is fast for demos, but GitHub Actions cannot see those local uploads.
+
+For datasets that should trigger automated evals, store redacted/versioned eval sets in GitHub:
+
+```text
+eval-demo/datasets/
+  sample_completeness.jsonl
+```
+
+When a dataset file in `eval-demo/datasets/` changes on `main` or in a pull request, `.github/workflows/completeness-eval.yml` runs the Completeness judge and uploads a report artifact.
+
+Recommended split:
+
+- GitHub: small, redacted, versioned regression/eval datasets.
+- Data warehouse or object storage: large product logs, raw traces, private customer data, or anything sensitive.
+- SQLite: local demo uploads and temporary exploration.

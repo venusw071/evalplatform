@@ -1,0 +1,78 @@
+name: Completeness Eval
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "eval-demo/datasets/**"
+      - "eval-demo/judges/completeness.json"
+      - "eval-demo/scripts/run_completeness_eval.py"
+      - ".github/workflows/completeness-eval.yml"
+  pull_request:
+    paths:
+      - "eval-demo/datasets/**"
+      - "eval-demo/judges/completeness.json"
+      - "eval-demo/scripts/run_completeness_eval.py"
+      - ".github/workflows/completeness-eval.yml"
+  workflow_dispatch:
+    inputs:
+      dataset:
+        description: "Dataset path or glob to evaluate"
+        required: false
+        default: "eval-demo/datasets/*.jsonl"
+      threshold:
+        description: "Override completeness pass threshold"
+        required: false
+        default: ""
+
+jobs:
+  completeness:
+    name: Run completeness judge
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run completeness eval
+        env:
+          DATASET_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.dataset || 'eval-demo/datasets/*.jsonl' }}
+          THRESHOLD_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.threshold || '' }}
+        run: |
+          mkdir -p eval-demo/reports
+          if [ -n "$THRESHOLD_INPUT" ]; then
+            python eval-demo/scripts/run_completeness_eval.py \
+              --datasets "$DATASET_INPUT" \
+              --judge eval-demo/judges/completeness.json \
+              --threshold "$THRESHOLD_INPUT" \
+              --out eval-demo/reports/completeness-report.json \
+              --markdown eval-demo/reports/completeness-report.md
+          else
+            python eval-demo/scripts/run_completeness_eval.py \
+              --datasets "$DATASET_INPUT" \
+              --judge eval-demo/judges/completeness.json \
+              --out eval-demo/reports/completeness-report.json \
+              --markdown eval-demo/reports/completeness-report.md
+          fi
+
+      - name: Add report to job summary
+        if: always()
+        run: |
+          if [ -f eval-demo/reports/completeness-report.md ]; then
+            cat eval-demo/reports/completeness-report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload completeness report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: completeness-eval-report
+          path: eval-demo/reports/

@@ -1,0 +1,2 @@
+{"id":"refund-policy-summary","input":"Summarize the refund policy in two bullets.","expected":"Two concise bullets covering refund eligibility and the refund request time window.","tags":"sample,completeness"}
+{"id":"billing-failure","input":"Explain why a customer subscription renewal failed and what they should do next.","expected":"Explains the billing failure, gives retry or payment-update steps, and avoids inventing account-specific details.","tags":"sample,completeness,support"}
