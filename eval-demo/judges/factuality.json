@@ -1,0 +1,13 @@
+{
+  "id": "factuality",
+  "name": "Factuality Scorer",
+  "version": "v1",
+  "model": "gpt-4.1-mini",
+  "threshold": 0.75,
+  "output_schema": {
+    "score": "number from 0 to 1",
+    "passed": "boolean",
+    "rationale": "one concise sentence explaining factual grounding"
+  },
+  "prompt": "You are a factuality evaluator. Score whether the model output is grounded in the provided input and expected/reference answer. Penalize unsupported claims, invented facts, overconfident uncertainty, and contradictions. Reward calibrated language when the reference does not contain enough evidence. Do not require details that are absent from the user request or reference."
+}

@@ -14,6 +14,7 @@ import urllib.request
 ROOT = Path(__file__).resolve().parents[1]
 STATIC_DIR = ROOT / "static"
 DB_PATH = ROOT / "eval_demo.sqlite3"
+JUDGE_DIR = ROOT / "judges"
 
 LOCAL_MODELS = [
     {"id": "local-helpful", "name": "Local Helpful", "description": "No-key demo model with generally strong answers."},
@@ -1126,8 +1127,23 @@ def make_judge_lab(conn):
     latest = conn.execute("select * from judge_runs order by created_at desc limit 1").fetchone()
     return {
         "defaultPrompt": default_judge_prompt(),
+        "judgeDefinitions": load_judge_definitions(),
         "latestJudgeRun": row_to_dict(latest) if latest else None,
     }
+
+
+def load_judge_definitions():
+    definitions = []
+    if not JUDGE_DIR.exists():
+        return definitions
+    for path in sorted(JUDGE_DIR.glob("*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if payload.get("id") and payload.get("name") and payload.get("prompt"):
+            definitions.append(payload)
+    return definitions
 
 
 if __name__ == "__main__":

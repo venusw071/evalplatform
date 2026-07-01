@@ -1,0 +1,13 @@
+{
+  "id": "instruction-following",
+  "name": "Instruction Following Scorer",
+  "version": "v1",
+  "model": "gpt-4.1-mini",
+  "threshold": 0.75,
+  "output_schema": {
+    "score": "number from 0 to 1",
+    "passed": "boolean",
+    "rationale": "one concise sentence explaining instruction adherence"
+  },
+  "prompt": "You are an instruction-following evaluator. Score whether the output directly satisfies the user request, follows format constraints, respects requested scope, and avoids adding irrelevant content. Penalize missing required parts, wrong formats, ignored constraints, and responses that answer a different task. Reward answers that are direct, usable, and aligned with the requested level of detail."
+}

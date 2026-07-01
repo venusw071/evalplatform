@@ -22,6 +22,7 @@ http://127.0.0.1:8000
 - Eval run creation across dataset, model, prompt version, and run type.
 - Mock or OpenAI-backed target model calls that store outputs, traces, latency, pass rate, baseline delta, and scorer rationales.
 - Working LLM-as-Judge flow with five editable scorers, judge model/checkpoint selection, no-key local judges, OpenAI execution, saved judge scores, and judge-run editing/deletion.
+- Versioned judge prompt definitions stored in `eval-demo/judges/*.json`.
 - Playground for testing local no-key or OpenAI checkpoints with a system prompt and user input.
 - Dashboard with recent run/model selection, focused run drilldown, score trends, and regression signals.
 - Run drilldown with example-level expected output, model output, tags, and scorer results.
@@ -72,6 +73,19 @@ Open **Judge Lab** after creating at least one eval run.
 Judge scores, pass/fail, rationales, and average judge score are saved in SQLite and shown in the Judge Lab.
 
 Click a saved judge run in the Judge summary list to view, edit, or delete it.
+
+The default scorer prompts are versioned in GitHub as JSON files:
+
+```text
+eval-demo/judges/
+  safety.json
+  factuality.json
+  instruction_following.json
+  completeness.json
+  style_tone.json
+```
+
+Edit those files when you want judge prompt changes to be reviewed, committed, and pushed.
 
 ## Playground
 

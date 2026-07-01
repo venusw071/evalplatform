@@ -488,6 +488,7 @@ async function renderRuns() {
 
 async function renderJudgeLab() {
   const lab = await api("/api/judge-lab");
+  const judgeDefinitions = lab.judgeDefinitions?.length ? lab.judgeDefinitions : DEFAULT_JUDGE_SCORERS;
   const selectedJudge = state.selectedJudgeRunId ? await api(`/api/judge-runs/${state.selectedJudgeRunId}`) : null;
   const latest = selectedJudge?.judgeRun || lab.latestJudgeRun;
   $("#judge-view").innerHTML = `
@@ -531,7 +532,7 @@ async function renderJudgeLab() {
         </label>
         <button class="ghost-button full-width" type="button" onclick="connectOpenAIModels()">Connect OpenAI and refresh judge models</button>
         <div class="scorer-editor-list">
-          ${DEFAULT_JUDGE_SCORERS.map((scorer) => `
+          ${judgeDefinitions.map((scorer) => `
             <section class="scorer-editor">
               <label class="scorer-toggle">
                 <input type="checkbox" name="judgeScorer" value="${scorer.id}" checked />
