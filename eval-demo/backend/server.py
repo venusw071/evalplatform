@@ -23,7 +23,6 @@ LOCAL_MODELS = [
     {"id": "local-json-strict", "name": "Local JSON Strict", "description": "No-key demo model tuned for structured-output evals."},
 ]
 LOCAL_JUDGE_MODELS = [
-    {"id": "local-judge-balanced", "name": "Local Judge Balanced", "description": "No-key demo judge for scorer prompt demos."},
     {"id": "local-judge-strict", "name": "Local Judge Strict", "description": "No-key demo judge with stricter pass thresholds."},
 ]
 
@@ -562,10 +561,10 @@ def create_run(conn, name, dataset_id, model, prompt_version, run_type, created_
 def create_judge_run(conn, payload):
     api_key = payload.get("apiKey") or os.environ.get("OPENAI_API_KEY")
     source_run_id = payload["sourceRunId"]
-    judge_model = payload.get("judgeModel") or "local-judge-balanced"
+    judge_model = payload.get("judgeModel") or "local-judge-strict"
     use_local_judge = judge_model.startswith("local-judge")
     if not api_key and not use_local_judge:
-        raise ValueError("OpenAI API key is required for OpenAI judge models. Select Local Judge Balanced to run without a key.")
+        raise ValueError("OpenAI API key is required for OpenAI judge models. Select Local Judge Strict to run without a key.")
     scorers = normalize_judge_scorers(payload)
     if not scorers:
         raise ValueError("Select at least one judge scorer to run.")
