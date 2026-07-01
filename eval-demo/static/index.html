@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>EvalOps Demo</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">E</div>
+          <div>
+            <strong>EvalOps</strong>
+            <span>Demo Console</span>
+          </div>
+        </div>
+        <nav class="nav">
+          <button class="nav-item active" data-view="dashboard">Dashboard</button>
+          <button class="nav-item" data-view="datasets">Datasets</button>
+          <button class="nav-item" data-view="runs">Eval Runs</button>
+          <button class="nav-item" data-view="judge">Judge Lab</button>
+          <button class="nav-item" data-view="playground">Playground</button>
+        </nav>
+        <div class="sidebar-note">
+          <span>Pipeline</span>
+          <strong>Logs -> Datasets -> Runner -> Scorers -> Reports</strong>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Model evaluation platform</p>
+            <h1 id="page-title">Dashboard</h1>
+          </div>
+          <div class="topbar-actions">
+            <button id="upload-dataset-button" class="ghost-button">Upload dataset</button>
+            <button id="new-run-button" class="primary-button">New eval run</button>
+          </div>
+        </header>
+        <div id="toast" class="toast" hidden></div>
+
+        <section id="dashboard-view" class="view active"></section>
+        <section id="datasets-view" class="view"></section>
+        <section id="runs-view" class="view"></section>
+        <section id="judge-view" class="view"></section>
+        <section id="playground-view" class="view"></section>
+      </main>
+    </div>
+
+    <dialog id="run-dialog">
+      <form method="dialog" class="dialog-body" id="run-form">
+        <div class="dialog-header">
+          <div>
+            <p class="eyebrow">Eval request</p>
+            <h2>Create run</h2>
+          </div>
+          <button class="ghost-button" value="cancel" type="button" id="close-dialog">Close</button>
+        </div>
+        <label>
+          Run name
+          <input name="name" value="Candidate release eval" />
+        </label>
+        <label>
+          Dataset
+          <select name="datasetId" id="dataset-select"></select>
+        </label>
+        <label>
+          Provider
+          <select name="provider" id="provider-select">
+            <option value="local">Local no-key models</option>
+            <option value="openai">OpenAI Responses API</option>
+          </select>
+        </label>
+        <div class="field-grid">
+          <label>
+            Target model
+            <select name="model" id="target-model-select"></select>
+          </label>
+          <label>
+            Prompt version
+            <input name="promptVersion" value="release-prompt-18" />
+          </label>
+        </div>
+        <label>
+          Custom model or checkpoint ID
+          <input name="customModel" placeholder="Optional, e.g. ft:gpt-4.1-mini:..." />
+        </label>
+        <label>
+          Max examples
+          <input name="maxExamples" type="number" min="1" max="50" value="5" />
+        </label>
+        <label>
+          OpenAI API key
+          <input name="apiKey" id="run-api-key" type="password" autocomplete="off" placeholder="Paste key to load OpenAI models" />
+        </label>
+        <button class="ghost-button full-width" type="button" id="connect-openai-button">Connect OpenAI and load models</button>
+        <p class="form-note" id="openai-connection-note">Local models run without a key. For OpenAI, connect once to load available base and fine-tuned model IDs.</p>
+        <label>
+          Eval type
+          <select name="runType">
+            <option>Release Eval</option>
+            <option>Custom Eval</option>
+            <option>Product Log Eval</option>
+          </select>
+        </label>
+        <div class="scorer-list">
+          <label><input type="checkbox" checked /> Instruction Following</label>
+          <label><input type="checkbox" checked /> Factuality</label>
+          <label><input type="checkbox" checked /> Safety</label>
+          <label><input type="checkbox" checked /> JSON Validity</label>
+        </div>
+        <button class="primary-button full-width" type="submit">Run eval</button>
+      </form>
+    </dialog>
+
+    <dialog id="dataset-dialog">
+      <form method="dialog" class="dialog-body" id="dataset-form">
+        <div class="dialog-header">
+          <div>
+            <p class="eyebrow">Dataset upload</p>
+            <h2>Import eval data</h2>
+          </div>
+          <button class="ghost-button" value="cancel" type="button" id="close-dataset-dialog">Close</button>
+        </div>
+        <label>
+          Dataset name
+          <input name="name" value="Uploaded product eval" />
+        </label>
+        <label>
+          Dataset tags
+          <input name="tags" value="uploaded, product" />
+        </label>
+        <div class="field-grid">
+          <label>
+            Source
+            <input name="source" value="Uploaded file" />
+          </label>
+          <label>
+            File
+            <input id="dataset-file" name="file" type="file" accept=".csv,.json,.jsonl,application/json,text/csv" />
+          </label>
+        </div>
+        <label>
+          Description
+          <input name="description" value="Imported examples for model evaluation." />
+        </label>
+        <div class="upload-help">
+          <strong>Accepted columns</strong>
+          <span>CSV/JSON rows should include <code>input</code> or <code>prompt</code>, optional <code>expected</code>, and optional <code>tags</code>.</span>
+        </div>
+        <button class="primary-button full-width" type="submit">Upload dataset</button>
+      </form>
+    </dialog>
+
+    <dialog id="judge-edit-dialog">
+      <form method="dialog" class="dialog-body" id="judge-edit-form">
+        <div class="dialog-header">
+          <div>
+            <p class="eyebrow">Saved judge</p>
+            <h2>Edit judge run</h2>
+          </div>
+          <button class="ghost-button" value="cancel" type="button" id="close-judge-edit-dialog">Close</button>
+        </div>
+        <input name="id" type="hidden" />
+        <label>
+          Judge name
+          <input name="name" />
+        </label>
+        <label>
+          Judge model
+          <input name="judgeModel" />
+        </label>
+        <label>
+          Judge prompt / scorer prompts
+          <textarea name="judgePrompt"></textarea>
+        </label>
+        <div class="dialog-actions">
+          <button class="row-button danger-button" type="button" id="delete-judge-run-button">Delete judge</button>
+          <button class="primary-button" type="submit">Save changes</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

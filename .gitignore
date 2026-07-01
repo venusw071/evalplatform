@@ -1,0 +1,6 @@
+.DS_Store
+__pycache__/
+*.pyc
+tmp/
+eval-demo/tmp/
+eval-demo/eval_demo.sqlite3
