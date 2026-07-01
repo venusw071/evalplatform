@@ -3,24 +3,24 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>EvalOps Demo</title>
+    <title>Eval Platform Demo</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <div class="app-shell">
+    <div class="app-shell" id="app-shell">
       <aside class="sidebar">
         <div class="brand">
           <div class="brand-mark">E</div>
           <div>
-            <strong>EvalOps</strong>
-            <span>Demo Console</span>
+            <strong>Eval Platform Demo</strong>
+            <span>Venus Wang</span>
           </div>
         </div>
         <nav class="nav">
           <button class="nav-item active" data-view="dashboard">Dashboard</button>
           <button class="nav-item" data-view="datasets">Datasets</button>
           <button class="nav-item" data-view="runs">Eval Runs</button>
-          <button class="nav-item" data-view="judge">Judge Lab</button>
+          <button class="nav-item" data-view="judge">LLM-as-Judge</button>
           <button class="nav-item" data-view="playground">Playground</button>
         </nav>
         <div class="sidebar-note">
@@ -36,6 +36,7 @@
             <h1 id="page-title">Dashboard</h1>
           </div>
           <div class="topbar-actions">
+            <button id="sidebar-toggle" class="ghost-button">Hide nav</button>
             <button id="upload-dataset-button" class="ghost-button">Upload dataset</button>
             <button id="new-run-button" class="primary-button">New eval run</button>
           </div>
@@ -180,6 +181,31 @@
         <div class="dialog-actions">
           <button class="row-button danger-button" type="button" id="delete-judge-run-button">Delete judge</button>
           <button class="primary-button" type="submit">Save changes</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="judge-definition-dialog">
+      <form method="dialog" class="dialog-body" id="judge-definition-form">
+        <div class="dialog-header">
+          <div>
+            <p class="eyebrow">Scorer definition</p>
+            <h2>Edit LLM-as-Judge scorer</h2>
+          </div>
+          <button class="ghost-button" value="cancel" type="button" id="close-judge-definition-dialog">Close</button>
+        </div>
+        <input name="id" type="hidden" />
+        <label>
+          Scorer name
+          <input name="name" />
+        </label>
+        <label>
+          Judge prompt
+          <textarea name="prompt"></textarea>
+        </label>
+        <div class="dialog-actions">
+          <button class="row-button danger-button" type="button" id="delete-judge-definition-button">Delete scorer</button>
+          <button class="primary-button" type="submit">Save scorer</button>
         </div>
       </form>
     </dialog>

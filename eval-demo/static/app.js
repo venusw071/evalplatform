@@ -11,8 +11,14 @@ const state = {
   datasetSearch: "",
   selectedDatasetTag: "",
   dashboardRunId: null,
+  dashboardCompareRunId: null,
+  compareRunId: null,
   dashboardModel: "",
   playgroundOutput: null,
+  judgeDefinitions: [],
+  sidebarCollapsed: localStorage.getItem("evalopsSidebarCollapsed") === "true",
+  playgroundHistory: [],
+  savedPrompts: [],
 };
 
 const DEFAULT_JUDGE_SCORERS = [
@@ -47,7 +53,7 @@ const pageTitles = {
   dashboard: "Dashboard",
   datasets: "Datasets",
   runs: "Eval Runs",
-  judge: "Judge Lab",
+  judge: "LLM-as-Judge",
   playground: "Playground",
 };
 
@@ -68,6 +74,7 @@ const api = async (path, options) => {
 };
 
 async function init() {
+  loadPlaygroundState();
   bindNavigation();
   bindDialog();
   await loadCoreData();
@@ -91,11 +98,19 @@ function bindDialog() {
   const dialog = $("#run-dialog");
   const datasetDialog = $("#dataset-dialog");
   const judgeEditDialog = $("#judge-edit-dialog");
+  const judgeDefinitionDialog = $("#judge-definition-dialog");
+  applySidebarState();
+  $("#sidebar-toggle").addEventListener("click", () => {
+    state.sidebarCollapsed = !state.sidebarCollapsed;
+    localStorage.setItem("evalopsSidebarCollapsed", String(state.sidebarCollapsed));
+    applySidebarState();
+  });
   $("#new-run-button").addEventListener("click", () => dialog.showModal());
   $("#upload-dataset-button").addEventListener("click", () => datasetDialog.showModal());
   $("#close-dialog").addEventListener("click", () => dialog.close());
   $("#close-dataset-dialog").addEventListener("click", () => datasetDialog.close());
   $("#close-judge-edit-dialog").addEventListener("click", () => judgeEditDialog.close());
+  $("#close-judge-definition-dialog").addEventListener("click", () => judgeDefinitionDialog.close());
   $("#run-form").elements.apiKey.addEventListener("input", (event) => {
     const key = event.target.value.trim();
     if (key) {
@@ -206,6 +221,43 @@ function bindDialog() {
       showToast(error.message, "error");
     }
   });
+  $("#judge-definition-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const data = Object.fromEntries(new FormData(form).entries());
+    const id = data.id || slugify(data.name || "custom-judge");
+    const next = { id, name: data.name.trim(), prompt: data.prompt.trim() };
+    if (!next.name || !next.prompt) {
+      showToast("Add a scorer name and judge prompt.", "error");
+      return;
+    }
+    const current = activeJudgeDefinitions();
+    const index = current.findIndex((scorer) => scorer.id === id);
+    if (index >= 0) current[index] = next;
+    else current.push(next);
+    saveJudgeDefinitions(current);
+    $("#judge-definition-dialog").close();
+    await renderJudgeLab();
+    showToast("LLM-as-Judge scorer saved.", "success");
+  });
+  $("#delete-judge-definition-button").addEventListener("click", async () => {
+    const form = $("#judge-definition-form");
+    const id = form.elements.id.value;
+    if (!id) {
+      $("#judge-definition-dialog").close();
+      return;
+    }
+    const current = activeJudgeDefinitions();
+    if (current.length <= 1) {
+      showToast("Keep at least one judge scorer available.", "error");
+      return;
+    }
+    if (!window.confirm("Delete this judge scorer from the demo?")) return;
+    saveJudgeDefinitions(current.filter((scorer) => scorer.id !== id));
+    $("#judge-definition-dialog").close();
+    await renderJudgeLab();
+    showToast("LLM-as-Judge scorer deleted.", "success");
+  });
 }
 
 async function loadCoreData() {
@@ -244,7 +296,9 @@ async function renderDashboard() {
   const modelRuns = state.dashboardModel ? state.runs.filter((run) => run.model === state.dashboardModel) : state.runs;
   if (modelRuns.length && !modelRuns.some((run) => run.id === state.dashboardRunId)) state.dashboardRunId = modelRuns[0].id;
   const selectedRunId = state.dashboardRunId || modelRuns[0]?.id;
+  if (state.dashboardCompareRunId === selectedRunId) state.dashboardCompareRunId = "";
   const detail = selectedRunId ? await api(`/api/eval-runs/${selectedRunId}?limit=5&preview=0`) : null;
+  const compareDetail = state.dashboardCompareRunId ? await api(`/api/eval-runs/${state.dashboardCompareRunId}?limit=5&preview=0`) : null;
   $("#dashboard-view").innerHTML = `
     <div class="table-panel">
       <div class="panel-header">
@@ -268,8 +322,16 @@ async function renderDashboard() {
             ${modelRuns.map((run) => `<option value="${escapeHtml(run.id)}" ${selectedRunId === run.id ? "selected" : ""}>${escapeHtml(run.name)} - ${escapeHtml(run.model)}</option>`).join("")}
           </select>
         </label>
+        <label>
+          Compare with
+          <select id="dashboard-compare-run-select">
+            <option value="">No comparison</option>
+            ${state.runs.filter((run) => run.id !== selectedRunId).map((run) => `<option value="${escapeHtml(run.id)}" ${state.dashboardCompareRunId === run.id ? "selected" : ""}>${escapeHtml(run.name)} - ${escapeHtml(run.model)}</option>`).join("")}
+          </select>
+        </label>
       </div>
       ${detail ? renderDashboardRun(detail) : "<p class='muted'>Create an eval run to inspect results.</p>"}
+      ${detail && compareDetail ? renderRunComparison(detail, compareDetail) : ""}
     </div>
     <div class="layout-two">
       <div class="table-panel">
@@ -297,16 +359,6 @@ async function renderDashboard() {
         </div>
       </div>
     </div>
-    <div class="panel">
-      <h2>Eval system workflow</h2>
-      <div class="workflow">
-        <div><strong>1. Logs</strong><span class="muted">Sample and scrub product traces.</span></div>
-        <div><strong>2. Datasets</strong><span class="muted">Version release, custom, and log evals.</span></div>
-        <div><strong>3. Runner</strong><span class="muted">Execute candidate prompts and models.</span></div>
-        <div><strong>4. Scorers</strong><span class="muted">Apply deterministic and LLM judge rubrics.</span></div>
-        <div><strong>5. Reports</strong><span class="muted">Drill down into regressions and traces.</span></div>
-      </div>
-    </div>
   `;
   $("#dashboard-model-select")?.addEventListener("change", async (event) => {
     state.dashboardModel = event.target.value;
@@ -317,21 +369,109 @@ async function renderDashboard() {
     state.dashboardRunId = event.target.value;
     await renderDashboard();
   });
+  $("#dashboard-compare-run-select")?.addEventListener("change", async (event) => {
+    state.dashboardCompareRunId = event.target.value;
+    await renderDashboard();
+  });
 }
 
 function renderDashboardRun(detail) {
-  const sample = detail.results.slice(0, 2);
+  const scorers = scorerAverages(detail.results);
+  const latestJudge = latestJudgeForRun(detail.run.id);
   return `
     <div class="dashboard-run">
-      <div class="score-grid">
-        <div class="score-pill"><strong>${formatScore(detail.run.avg_score)} avg score</strong><span>${escapeHtml(detail.run.model)} / ${escapeHtml(detail.run.prompt_version)}</span></div>
-        <div class="score-pill"><strong>${formatPct(detail.run.pass_rate)} pass rate</strong><span>${detail.run.failure_count} failures</span></div>
+      <div class="run-hero-card">
+        <div>
+          <span class="eyebrow">Selected run</span>
+          <h2>${escapeHtml(detail.run.name)}</h2>
+          <p class="muted">${escapeHtml(detail.run.model)} / ${escapeHtml(detail.run.prompt_version)}</p>
+        </div>
+        <div class="hero-metrics">
+          <div><span>Average score</span><strong>${formatScore(detail.run.avg_score)}</strong></div>
+          <div><span>Pass rate</span><strong>${formatPct(detail.run.pass_rate)}</strong></div>
+          <div><span>Failures</span><strong>${detail.run.failure_count}</strong></div>
+          <div><span>LLM judge</span><strong>${latestJudge ? formatScore(latestJudge.avg_score) : "Not run"}</strong></div>
+        </div>
+      </div>
+      <div class="scorer-score-grid">
+        ${scorers.map((score) => `
+          <div class="scorer-score-card">
+            <span>${escapeHtml(score.name)}</span>
+            <strong>${formatScore(score.avg)}</strong>
+            <small>${score.count} examples scored</small>
+          </div>
+        `).join("") || "<p class='muted'>No scorer scores available yet.</p>"}
       </div>
       <div class="result-list compact-results">
-        ${sample.map(renderResultCard).join("")}
+        ${detail.results.slice(0, 2).map(renderResultCard).join("")}
       </div>
     </div>
   `;
+}
+
+function renderRunComparison(primary, compare) {
+  const primaryScorers = scorerAverages(primary.results);
+  const compareScorers = scorerAverages(compare.results);
+  const names = Array.from(new Set([...primaryScorers.map((item) => item.name), ...compareScorers.map((item) => item.name)])).sort();
+  return `
+    <div class="comparison-panel">
+      <div class="panel-header">
+        <div>
+          <h2>Side-by-side run comparison</h2>
+          <p class="muted">${escapeHtml(primary.run.name)} vs ${escapeHtml(compare.run.name)}</p>
+        </div>
+      </div>
+      <div class="comparison-grid">
+        ${comparisonMetric("Average score", primary.run.avg_score, compare.run.avg_score, true)}
+        ${comparisonMetric("Pass rate", primary.run.pass_rate, compare.run.pass_rate, true)}
+        ${comparisonMetric("Failure count", primary.run.failure_count, compare.run.failure_count, false)}
+        ${comparisonMetric("Latency", primary.run.latency_ms, compare.run.latency_ms, false, "ms")}
+      </div>
+      <div class="comparison-table-wrap">
+        <table class="table comparison-table">
+          <thead><tr><th>LLM-as-Judge / scorer</th><th>${escapeHtml(primary.run.model)}</th><th>${escapeHtml(compare.run.model)}</th><th>Delta</th></tr></thead>
+          <tbody>
+            ${names.map((name) => {
+              const left = primaryScorers.find((item) => item.name === name)?.avg ?? 0;
+              const right = compareScorers.find((item) => item.name === name)?.avg ?? 0;
+              const delta = left - right;
+              return `
+                <tr>
+                  <td><strong>${escapeHtml(name)}</strong></td>
+                  <td>${formatScore(left)}</td>
+                  <td>${formatScore(right)}</td>
+                  <td><span class="status ${deltaTone(delta, true)}">${delta >= 0 ? "+" : ""}${formatScore(delta)}</span></td>
+                </tr>
+              `;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function comparisonMetric(label, primary, compare, higherIsBetter, suffix = "") {
+  const delta = Number(primary || 0) - Number(compare || 0);
+  const tone = deltaTone(delta, higherIsBetter);
+  const formatter = suffix ? (value) => `${Math.round(value || 0)}${suffix}` : formatScore;
+  return `
+    <div class="comparison-card ${tone}">
+      <span>${label}</span>
+      <div class="comparison-values">
+        <strong>${formatter(primary)}</strong>
+        <strong>${formatter(compare)}</strong>
+      </div>
+      <small>${delta >= 0 ? "+" : ""}${formatter(delta)} vs comparison</small>
+    </div>
+  `;
+}
+
+function deltaTone(delta, higherIsBetter) {
+  const adjusted = higherIsBetter ? delta : -delta;
+  if (adjusted > 0.02) return "good";
+  if (adjusted < -0.02) return "bad";
+  return "warn";
 }
 
 async function renderDatasets() {
@@ -459,7 +599,9 @@ function renderDatasetDetail(detail) {
 
 async function renderRuns() {
   const runId = state.selectedRunId || state.runs[0]?.id;
+  if (state.compareRunId === runId) state.compareRunId = "";
   const detail = runId ? await api(`/api/eval-runs/${runId}?limit=20&preview=0`) : null;
+  const compareDetail = state.compareRunId ? await api(`/api/eval-runs/${state.compareRunId}?limit=20&preview=0`) : null;
   $("#runs-view").innerHTML = `
     <div class="layout-two">
       <div class="table-panel">
@@ -474,8 +616,16 @@ async function renderRuns() {
       <div class="panel">
         <h2>Run summary</h2>
         ${detail ? runSummary(detail.run) : "<p class='muted'>No runs yet.</p>"}
+        <label class="compare-picker">
+          Compare against
+          <select id="run-compare-select">
+            <option value="">No comparison</option>
+            ${state.runs.filter((run) => run.id !== runId).map((run) => `<option value="${escapeHtml(run.id)}" ${state.compareRunId === run.id ? "selected" : ""}>${escapeHtml(run.name)} - ${escapeHtml(run.model)}</option>`).join("")}
+          </select>
+        </label>
       </div>
     </div>
+    ${detail && compareDetail ? renderRunComparison(detail, compareDetail) : ""}
     ${detail ? renderRunDetail(detail) : ""}
   `;
   document.querySelectorAll("[data-run-id]").forEach((button) => {
@@ -484,13 +634,17 @@ async function renderRuns() {
       await renderRuns();
     });
   });
+  $("#run-compare-select")?.addEventListener("change", async (event) => {
+    state.compareRunId = event.target.value;
+    await renderRuns();
+  });
 }
 
 async function renderJudgeLab() {
   const lab = await api("/api/judge-lab");
-  const judgeDefinitions = lab.judgeDefinitions?.length ? lab.judgeDefinitions : DEFAULT_JUDGE_SCORERS;
+  state.judgeDefinitions = loadJudgeDefinitions(lab.judgeDefinitions?.length ? lab.judgeDefinitions : DEFAULT_JUDGE_SCORERS);
+  const judgeDefinitions = activeJudgeDefinitions();
   const selectedJudge = state.selectedJudgeRunId ? await api(`/api/judge-runs/${state.selectedJudgeRunId}`) : null;
-  const latest = selectedJudge?.judgeRun || lab.latestJudgeRun;
   $("#judge-view").innerHTML = `
     <div class="layout-two">
       <form class="panel judge-form" id="judge-form">
@@ -545,15 +699,35 @@ async function renderJudgeLab() {
         <button class="primary-button full-width" type="submit">Run LLM-as-Judge</button>
       </form>
       <div class="panel">
-        <h2>Judge summary</h2>
-        ${latest ? runJudgeSummary(latest) : "<p class='muted'>No judge runs yet.</p>"}
+        <div class="panel-header">
+          <div>
+            <h2>LLM-as-Judge scorers</h2>
+            <p class="muted">Edit these cards to update the scorer prompts used by the run form.</p>
+          </div>
+          <button class="row-button" onclick="openJudgeDefinitionEditor()">Add scorer</button>
+        </div>
+        <div class="judge-card-list">
+          ${judgeDefinitions.map((scorer) => `
+            <article class="judge-card">
+              <div>
+                <strong>${escapeHtml(scorer.name)}</strong>
+                ${expandableBlock("Judge prompt", scorer.prompt, 170)}
+              </div>
+              <div class="table-actions">
+                <button class="row-button" onclick="openJudgeDefinitionEditor('${escapeJs(scorer.id)}')">Edit</button>
+                <button class="row-button danger-button" onclick="deleteJudgeDefinition('${escapeJs(scorer.id)}')">Delete</button>
+              </div>
+            </article>
+          `).join("")}
+        </div>
+        <h3>Recent judge runs</h3>
         <div class="bar-list compact-list">
           ${state.judgeRuns.slice(0, 6).map((run) => `
             <button class="judge-run-row" onclick="openJudgeEditor('${run.id}')">
               <strong>${run.name}</strong>
-              <span>${run.judge_model} - ${formatScore(run.avg_score)} score - ${formatPct(run.pass_rate)} pass</span>
+              <span>${formatScore(run.avg_score)} score / ${formatPct(run.pass_rate)} pass</span>
             </button>
-          `).join("")}
+          `).join("") || "<p class='muted'>No judge runs yet.</p>"}
         </div>
       </div>
     </div>
@@ -563,6 +737,8 @@ async function renderJudgeLab() {
 }
 
 async function renderPlayground() {
+  const selectedPrompt = state.savedPrompts.find((prompt) => prompt.id === state.selectedPromptId) || state.savedPrompts[0] || defaultSystemPrompt();
+  const history = state.playgroundHistory.slice(0, 12);
   $("#playground-view").innerHTML = `
     <div class="layout-two">
       <form class="panel judge-form" id="playground-form">
@@ -590,9 +766,28 @@ async function renderPlayground() {
           <input name="apiKey" id="playground-api-key" type="password" autocomplete="off" placeholder="Optional unless using OpenAI" value="${escapeHtml(sessionStorage.getItem("evalopsOpenAIKey") || "")}" />
         </label>
         <button class="ghost-button full-width" type="button" onclick="connectOpenAIModels()">Connect OpenAI and load models</button>
+        <div class="prompt-library">
+          <label>
+            Saved system prompt
+            <select id="saved-prompt-select">
+              ${state.savedPrompts.map((prompt) => `<option value="${escapeHtml(prompt.id)}" ${selectedPrompt.id === prompt.id ? "selected" : ""}>${escapeHtml(prompt.name)} v${escapeHtml(prompt.version)}</option>`).join("")}
+            </select>
+          </label>
+          <div class="field-grid">
+            <label>
+              Prompt name
+              <input name="promptName" value="${escapeHtml(selectedPrompt.name)}" />
+            </label>
+            <label>
+              Version
+              <input name="promptVersion" value="${escapeHtml(nextPromptVersion(selectedPrompt.version))}" />
+            </label>
+          </div>
+          <button class="ghost-button full-width" type="button" id="save-system-prompt-button">Save system prompt version</button>
+        </div>
         <label>
           System prompt
-          <textarea name="systemPrompt">You are a concise, policy-aware product assistant.</textarea>
+          <textarea name="systemPrompt">${escapeHtml(selectedPrompt.prompt)}</textarea>
         </label>
         <label>
           User input
@@ -606,6 +801,18 @@ async function renderPlayground() {
           <div class="score-pill"><strong>${escapeHtml(state.playgroundOutput.model)}</strong><span>${escapeHtml(state.playgroundOutput.provider)} - ${state.playgroundOutput.latencyMs}ms</span></div>
           ${expandableBlock("Generated model output", state.playgroundOutput.output, 900)}
         ` : "<p class='muted'>Generated output appears here.</p>"}
+        <h3>Saved conversations</h3>
+        <div class="history-list">
+          ${history.map((item) => `
+            <article class="history-item">
+              <button class="judge-run-row" onclick="loadPlaygroundConversation('${escapeJs(item.id)}')">
+                <strong>${escapeHtml(item.model)}</strong>
+                <span>${escapeHtml(item.createdAt)} / ${escapeHtml(clipPlain(item.input, 90))}</span>
+              </button>
+              <button class="row-button danger-button" onclick="deletePlaygroundConversation('${escapeJs(item.id)}')">Delete</button>
+            </article>
+          `).join("") || "<p class='muted'>Generated playground runs will be saved here.</p>"}
+        </div>
       </div>
     </div>
   `;
@@ -630,7 +837,6 @@ function updateTargetModelOptions() {
 
 function judgeModelOptions() {
   const localModels = [
-    ["local-judge-balanced", "Local Judge Balanced - no API key"],
     ["local-judge-strict", "Local Judge Strict - no API key"],
   ];
   const openAIModels = state.openAIModels.length ? state.openAIModels : ["gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini", "gpt-4o"];
@@ -734,7 +940,7 @@ function renderJudgeDetail(detail) {
       <div class="panel-header">
         <div>
           <h2>${detail.judgeRun.name}</h2>
-          <p class="muted">LLM-as-Judge results from ${detail.judgeRun.judge_model}.</p>
+          <p class="muted">LLM-as-Judge results by scorer and example.</p>
         </div>
         <span class="status ${detail.judgeRun.pass_rate >= 0.7 ? "good" : "warn"}">${formatScore(detail.judgeRun.avg_score)}</span>
       </div>
@@ -852,6 +1058,29 @@ async function openJudgeEditor(judgeRunId) {
   } catch (error) {
     showToast(error.message, "error");
   }
+}
+
+function openJudgeDefinitionEditor(id = "") {
+  const form = $("#judge-definition-form");
+  const scorer = activeJudgeDefinitions().find((item) => item.id === id) || { id: "", name: "", prompt: "" };
+  form.elements.id.value = scorer.id;
+  form.elements.name.value = scorer.name;
+  form.elements.prompt.value = scorer.prompt;
+  $("#delete-judge-definition-button").hidden = !scorer.id;
+  $("#judge-definition-dialog").showModal();
+}
+
+async function deleteJudgeDefinition(id) {
+  const current = activeJudgeDefinitions();
+  if (current.length <= 1) {
+    showToast("Keep at least one judge scorer available.", "error");
+    return;
+  }
+  const scorer = current.find((item) => item.id === id);
+  if (!window.confirm(`Delete "${scorer?.name || id}" from the LLM-as-Judge scorers?`)) return;
+  saveJudgeDefinitions(current.filter((item) => item.id !== id));
+  await renderJudgeLab();
+  showToast("LLM-as-Judge scorer deleted.", "success");
 }
 
 async function inspectDataset(datasetId) {
@@ -1008,6 +1237,29 @@ function bindPlaygroundForm() {
   provider.addEventListener("change", () => {
     model.innerHTML = playgroundModelOptions(provider.value);
   });
+  $("#saved-prompt-select")?.addEventListener("change", async (event) => {
+    state.selectedPromptId = event.target.value;
+    await renderPlayground();
+  });
+  $("#save-system-prompt-button")?.addEventListener("click", async () => {
+    const data = Object.fromEntries(new FormData(form).entries());
+    const prompt = {
+      id: `prompt-${Date.now()}`,
+      name: data.promptName?.trim() || "Product assistant",
+      version: data.promptVersion?.trim() || "1.0",
+      prompt: data.systemPrompt?.trim() || "",
+      createdAt: new Date().toLocaleString(),
+    };
+    if (!prompt.prompt) {
+      showToast("Write a system prompt before saving a version.", "error");
+      return;
+    }
+    state.savedPrompts.unshift(prompt);
+    state.selectedPromptId = prompt.id;
+    savePlaygroundState();
+    await renderPlayground();
+    showToast(`Saved ${prompt.name} v${prompt.version}.`, "success");
+  });
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const submitButton = form.querySelector('button[type="submit"]');
@@ -1021,6 +1273,18 @@ function bindPlaygroundForm() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       });
+      state.playgroundHistory.unshift({
+        id: `conversation-${Date.now()}`,
+        createdAt: new Date().toLocaleString(),
+        provider: data.provider,
+        model: state.playgroundOutput.model,
+        systemPrompt: data.systemPrompt,
+        input: data.input,
+        output: state.playgroundOutput.output,
+        latencyMs: state.playgroundOutput.latencyMs,
+      });
+      state.playgroundHistory = state.playgroundHistory.slice(0, 40);
+      savePlaygroundState();
       await renderPlayground();
       showToast("Playground output generated.", "success");
     } catch (error) {
@@ -1117,6 +1381,117 @@ function normalizeUploadRow(row) {
   };
 }
 
+function scorerAverages(results) {
+  const byName = new Map();
+  results.forEach((result) => {
+    (result.scorer_results || []).forEach((score) => {
+      const item = byName.get(score.scorer) || { name: score.scorer, total: 0, count: 0 };
+      item.total += Number(score.score || 0);
+      item.count += 1;
+      byName.set(score.scorer, item);
+    });
+  });
+  return Array.from(byName.values()).map((item) => ({ ...item, avg: item.count ? item.total / item.count : 0 }));
+}
+
+function latestJudgeForRun(runId) {
+  return state.judgeRuns.find((run) => run.source_run_id === runId);
+}
+
+function activeJudgeDefinitions() {
+  return state.judgeDefinitions.length ? state.judgeDefinitions : DEFAULT_JUDGE_SCORERS;
+}
+
+function loadJudgeDefinitions(baseDefinitions) {
+  try {
+    const stored = JSON.parse(localStorage.getItem("evalopsJudgeDefinitions") || "[]");
+    if (Array.isArray(stored) && stored.length) return stored;
+  } catch {
+    localStorage.removeItem("evalopsJudgeDefinitions");
+  }
+  return baseDefinitions;
+}
+
+function saveJudgeDefinitions(definitions) {
+  state.judgeDefinitions = definitions;
+  localStorage.setItem("evalopsJudgeDefinitions", JSON.stringify(definitions));
+}
+
+function loadPlaygroundState() {
+  try {
+    state.playgroundHistory = JSON.parse(localStorage.getItem("evalopsPlaygroundHistory") || "[]");
+    state.savedPrompts = JSON.parse(localStorage.getItem("evalopsSystemPrompts") || "[]");
+  } catch {
+    state.playgroundHistory = [];
+    state.savedPrompts = [];
+  }
+  if (!state.savedPrompts.length) state.savedPrompts = [defaultSystemPrompt()];
+  state.selectedPromptId = state.selectedPromptId || state.savedPrompts[0]?.id;
+}
+
+function savePlaygroundState() {
+  localStorage.setItem("evalopsPlaygroundHistory", JSON.stringify(state.playgroundHistory));
+  localStorage.setItem("evalopsSystemPrompts", JSON.stringify(state.savedPrompts));
+}
+
+function defaultSystemPrompt() {
+  return {
+    id: "prompt-default-product-assistant",
+    name: "Product assistant",
+    version: "1.0",
+    prompt: "You are a concise, policy-aware product assistant.",
+    createdAt: "Demo default",
+  };
+}
+
+function nextPromptVersion(version) {
+  const numeric = Number.parseFloat(version);
+  if (!Number.isFinite(numeric)) return "1.0";
+  return (numeric + 0.1).toFixed(1);
+}
+
+async function loadPlaygroundConversation(id) {
+  const item = state.playgroundHistory.find((conversation) => conversation.id === id);
+  if (!item) return;
+  state.playgroundOutput = {
+    provider: item.provider,
+    model: item.model,
+    output: item.output,
+    latencyMs: item.latencyMs,
+  };
+  const prompt = {
+    id: `prompt-loaded-${Date.now()}`,
+    name: "Loaded conversation prompt",
+    version: "draft",
+    prompt: item.systemPrompt,
+    createdAt: new Date().toLocaleString(),
+  };
+  state.savedPrompts.unshift(prompt);
+  state.savedPrompts = state.savedPrompts.slice(0, 30);
+  state.selectedPromptId = prompt.id;
+  savePlaygroundState();
+  await renderPlayground();
+}
+
+async function deletePlaygroundConversation(id) {
+  state.playgroundHistory = state.playgroundHistory.filter((conversation) => conversation.id !== id);
+  savePlaygroundState();
+  await renderPlayground();
+  showToast("Playground conversation deleted.", "success");
+}
+
+function applySidebarState() {
+  $("#app-shell").classList.toggle("nav-collapsed", state.sidebarCollapsed);
+  $("#sidebar-toggle").textContent = state.sidebarCollapsed ? "Show nav" : "Hide nav";
+}
+
+function slugify(value) {
+  return String(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "") || `judge-${Date.now()}`;
+}
+
 function uniqueModels() {
   return Array.from(new Set(state.runs.map((run) => run.model))).sort();
 }
@@ -1142,6 +1517,11 @@ function clip(value, max = 320) {
   const text = String(value ?? "");
   const shortened = text.length > max ? `${text.slice(0, max)}...` : text;
   return escapeHtml(shortened);
+}
+
+function clipPlain(value, max = 320) {
+  const text = String(value ?? "");
+  return text.length > max ? `${text.slice(0, max)}...` : text;
 }
 
 function expandableBlock(label, value, max = 320) {
