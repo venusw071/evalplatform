@@ -211,7 +211,8 @@ h3 {
 
 .primary-button,
 .ghost-button,
-.row-button {
+.row-button,
+.icon-button {
   min-height: 36px;
   border-radius: 6px;
   border: 1px solid transparent;
@@ -225,12 +226,21 @@ h3 {
 }
 
 .ghost-button,
-.row-button {
+.row-button,
+.icon-button {
   background: #ffffff;
   color: var(--ink);
   border-color: var(--line);
   min-width: 76px;
   white-space: nowrap;
+}
+
+.icon-button {
+  min-width: 38px;
+  width: 38px;
+  padding: 0;
+  font-weight: 800;
+  line-height: 1;
 }
 
 .full-width {
@@ -350,6 +360,44 @@ h3 {
   background: #ffffff;
   padding: 16px;
   margin-top: 16px;
+}
+
+.run-viewer-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.run-top-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(260px, 1fr);
+  gap: 12px;
+}
+
+.summary-card-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.summary-card {
+  border: 1px solid var(--line);
+  background: #fbfcfc;
+  border-radius: 8px;
+  padding: 14px;
+  min-height: 104px;
+}
+
+.summary-card span,
+.summary-card small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.summary-card strong {
+  display: block;
+  margin: 8px 0 4px;
+  font-size: 26px;
 }
 
 .comparison-card.good {
@@ -762,6 +810,11 @@ h3 {
   cursor: pointer;
 }
 
+.judge-run-row.active {
+  border-color: #9fc9f7;
+  background: #eef6ff;
+}
+
 .judge-card-list,
 .history-list {
   display: grid;
@@ -788,6 +841,13 @@ h3 {
 .prompt-library {
   display: grid;
   gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfc;
+  padding: 12px;
+}
+
+.saved-conversation-detail {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fbfcfc;
@@ -924,6 +984,8 @@ textarea {
   .hero-metrics,
   .scorer-score-grid,
   .comparison-grid,
+  .run-top-grid,
+  .summary-card-grid,
   .judge-card,
   .history-item {
     grid-template-columns: 1fr;

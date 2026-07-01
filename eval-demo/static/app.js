@@ -19,6 +19,7 @@ const state = {
   sidebarCollapsed: localStorage.getItem("evalopsSidebarCollapsed") === "true",
   playgroundHistory: [],
   savedPrompts: [],
+  selectedConversationId: null,
 };
 
 const DEFAULT_JUDGE_SCORERS = [
@@ -291,7 +292,6 @@ async function renderActiveView() {
 }
 
 async function renderDashboard() {
-  const summary = await api("/api/summary");
   const models = uniqueModels();
   const modelRuns = state.dashboardModel ? state.runs.filter((run) => run.model === state.dashboardModel) : state.runs;
   if (modelRuns.length && !modelRuns.some((run) => run.id === state.dashboardRunId)) state.dashboardRunId = modelRuns[0].id;
@@ -333,31 +333,15 @@ async function renderDashboard() {
       ${detail ? renderDashboardRun(detail) : "<p class='muted'>Create an eval run to inspect results.</p>"}
       ${detail && compareDetail ? renderRunComparison(detail, compareDetail) : ""}
     </div>
-    <div class="layout-two">
-      <div class="table-panel">
-        <div class="panel-header">
-          <div>
-            <h2>Recent eval runs</h2>
-            <p class="muted">Latest release, custom, and product-log evaluations.</p>
-          </div>
-          <button class="row-button" onclick="switchView('runs')">Open runs</button>
+    <div class="table-panel">
+      <div class="panel-header">
+        <div>
+          <h2>Recent eval runs</h2>
+          <p class="muted">Latest release, custom, and product-log evaluations.</p>
         </div>
-        ${runsTable(state.runs.slice(0, 5))}
+        <button class="row-button" onclick="switchView('runs')">Open runs</button>
       </div>
-      <div class="panel">
-        <h2>Aggregate context</h2>
-        <p class="muted">Rollup metrics for the full demo workspace.</p>
-        <div class="metric-stack">
-          ${metric("Total runs", summary.runCount)}
-          ${metric("Average score", formatScore(summary.avgScore))}
-          ${metric("Pass rate", formatPct(summary.avgPassRate))}
-          ${metric("Open regressions", summary.openRegressions)}
-        </div>
-        <h3>Score trend</h3>
-        <div class="bar-list">
-          ${summary.trend.map((item) => bar(item.name, item.score)).join("")}
-        </div>
-      </div>
+      ${runsTable(state.runs.slice(0, 5))}
     </div>
   `;
   $("#dashboard-model-select")?.addEventListener("change", async (event) => {
@@ -603,20 +587,21 @@ async function renderRuns() {
   const detail = runId ? await api(`/api/eval-runs/${runId}?limit=20&preview=0`) : null;
   const compareDetail = state.compareRunId ? await api(`/api/eval-runs/${state.compareRunId}?limit=20&preview=0`) : null;
   $("#runs-view").innerHTML = `
-    <div class="layout-two">
-      <div class="table-panel">
-        <div class="panel-header">
-          <div>
-            <h2>Runs</h2>
-            <p class="muted">Compare prompt, model, and dataset changes against baseline.</p>
-          </div>
+    <div class="table-panel run-viewer-panel">
+      <div class="panel-header">
+        <div>
+          <h2>Run viewer</h2>
+          <p class="muted">Pick a primary run, compare it against another run, then inspect row-level traces below.</p>
         </div>
-        ${runsTable(state.runs)}
       </div>
-      <div class="panel">
-        <h2>Run summary</h2>
-        ${detail ? runSummary(detail.run) : "<p class='muted'>No runs yet.</p>"}
-        <label class="compare-picker">
+      <div class="run-top-grid">
+        <label>
+          Primary run
+          <select id="run-primary-select">
+            ${state.runs.map((run) => `<option value="${escapeHtml(run.id)}" ${runId === run.id ? "selected" : ""}>${escapeHtml(run.name)} - ${escapeHtml(run.model)}</option>`).join("")}
+          </select>
+        </label>
+        <label>
           Compare against
           <select id="run-compare-select">
             <option value="">No comparison</option>
@@ -624,8 +609,18 @@ async function renderRuns() {
           </select>
         </label>
       </div>
+      ${detail ? renderRunSummaryCards(detail) : "<p class='muted'>No runs yet.</p>"}
+      ${detail && compareDetail ? renderRunComparison(detail, compareDetail) : ""}
     </div>
-    ${detail && compareDetail ? renderRunComparison(detail, compareDetail) : ""}
+    <div class="table-panel">
+        <div class="panel-header">
+          <div>
+            <h2>Runs</h2>
+            <p class="muted">Compare prompt, model, and dataset changes against baseline.</p>
+          </div>
+        </div>
+        ${runsTable(state.runs)}
+    </div>
     ${detail ? renderRunDetail(detail) : ""}
   `;
   document.querySelectorAll("[data-run-id]").forEach((button) => {
@@ -633,6 +628,10 @@ async function renderRuns() {
       state.selectedRunId = button.dataset.runId;
       await renderRuns();
     });
+  });
+  $("#run-primary-select")?.addEventListener("change", async (event) => {
+    state.selectedRunId = event.target.value;
+    await renderRuns();
   });
   $("#run-compare-select")?.addEventListener("change", async (event) => {
     state.compareRunId = event.target.value;
@@ -723,7 +722,7 @@ async function renderJudgeLab() {
         <h3>Recent judge runs</h3>
         <div class="bar-list compact-list">
           ${state.judgeRuns.slice(0, 6).map((run) => `
-            <button class="judge-run-row" onclick="openJudgeEditor('${run.id}')">
+            <button class="judge-run-row ${state.selectedJudgeRunId === run.id ? "active" : ""}" onclick="inspectJudgeRun('${run.id}')">
               <strong>${run.name}</strong>
               <span>${formatScore(run.avg_score)} score / ${formatPct(run.pass_rate)} pass</span>
             </button>
@@ -738,6 +737,7 @@ async function renderJudgeLab() {
 
 async function renderPlayground() {
   const selectedPrompt = state.savedPrompts.find((prompt) => prompt.id === state.selectedPromptId) || state.savedPrompts[0] || defaultSystemPrompt();
+  const selectedConversation = state.playgroundHistory.find((item) => item.id === state.selectedConversationId) || null;
   const history = state.playgroundHistory.slice(0, 12);
   $("#playground-view").innerHTML = `
     <div class="layout-two">
@@ -805,7 +805,7 @@ async function renderPlayground() {
         <div class="history-list">
           ${history.map((item) => `
             <article class="history-item">
-              <button class="judge-run-row" onclick="loadPlaygroundConversation('${escapeJs(item.id)}')">
+              <button class="judge-run-row ${state.selectedConversationId === item.id ? "active" : ""}" onclick="loadPlaygroundConversation('${escapeJs(item.id)}')">
                 <strong>${escapeHtml(item.model)}</strong>
                 <span>${escapeHtml(item.createdAt)} / ${escapeHtml(clipPlain(item.input, 90))}</span>
               </button>
@@ -813,6 +813,7 @@ async function renderPlayground() {
             </article>
           `).join("") || "<p class='muted'>Generated playground runs will be saved here.</p>"}
         </div>
+        ${selectedConversation ? renderSavedConversation(selectedConversation) : ""}
       </div>
     </div>
   `;
@@ -924,6 +925,35 @@ function runSummary(run) {
   `;
 }
 
+function renderRunSummaryCards(detail) {
+  const run = detail.run;
+  const scorers = scorerAverages(detail.results);
+  return `
+    <div class="summary-card-grid">
+      <div class="summary-card">
+        <span>Average score</span>
+        <strong>${formatScore(run.avg_score)}</strong>
+        <small>${escapeHtml(run.model)} / ${escapeHtml(run.prompt_version)}</small>
+      </div>
+      <div class="summary-card">
+        <span>Pass rate</span>
+        <strong>${formatPct(run.pass_rate)}</strong>
+        <small>${run.failure_count} examples need review</small>
+      </div>
+      <div class="summary-card">
+        <span>Latency</span>
+        <strong>${Math.round(run.latency_ms)}ms</strong>
+        <small>${escapeHtml(run.run_type)}</small>
+      </div>
+      <div class="summary-card">
+        <span>Scorers</span>
+        <strong>${scorers.length}</strong>
+        <small>${escapeHtml(scorers.map((score) => score.name).slice(0, 2).join(", ") || "No scorers")}</small>
+      </div>
+    </div>
+  `;
+}
+
 function runJudgeSummary(run) {
   return `
     <div class="bar-list">
@@ -944,7 +974,30 @@ function renderJudgeDetail(detail) {
         </div>
         <span class="status ${detail.judgeRun.pass_rate >= 0.7 ? "good" : "warn"}">${formatScore(detail.judgeRun.avg_score)}</span>
       </div>
+      <div class="summary-card-grid">
+        <div class="summary-card"><span>Judge score</span><strong>${formatScore(detail.judgeRun.avg_score)}</strong><small>${formatPct(detail.judgeRun.pass_rate)} pass rate</small></div>
+        <div class="summary-card"><span>Scored rows</span><strong>${detail.judgeRun.example_count}</strong><small>Click each row to expand prompt, expected answer, and model output.</small></div>
+      </div>
       ${detail.results.map(renderJudgeResultCard).join("")}
+    </div>
+  `;
+}
+
+function renderSavedConversation(item) {
+  return `
+    <div class="saved-conversation-detail">
+      <div class="panel-header">
+        <div>
+          <h3>Saved conversation detail</h3>
+          <p class="muted">${escapeHtml(item.model)} / ${escapeHtml(item.provider)} / ${escapeHtml(item.createdAt)}</p>
+        </div>
+        <span class="status good">${item.latencyMs}ms</span>
+      </div>
+      <div class="result-grid">
+        ${expandableBlock("System prompt", item.systemPrompt, 260)}
+        ${expandableBlock("User input", item.input, 260)}
+        ${expandableBlock("Model output", item.output, 520)}
+      </div>
     </div>
   `;
 }
@@ -1453,28 +1506,20 @@ function nextPromptVersion(version) {
 async function loadPlaygroundConversation(id) {
   const item = state.playgroundHistory.find((conversation) => conversation.id === id);
   if (!item) return;
+  state.selectedConversationId = id;
   state.playgroundOutput = {
     provider: item.provider,
     model: item.model,
     output: item.output,
     latencyMs: item.latencyMs,
   };
-  const prompt = {
-    id: `prompt-loaded-${Date.now()}`,
-    name: "Loaded conversation prompt",
-    version: "draft",
-    prompt: item.systemPrompt,
-    createdAt: new Date().toLocaleString(),
-  };
-  state.savedPrompts.unshift(prompt);
-  state.savedPrompts = state.savedPrompts.slice(0, 30);
-  state.selectedPromptId = prompt.id;
   savePlaygroundState();
   await renderPlayground();
 }
 
 async function deletePlaygroundConversation(id) {
   state.playgroundHistory = state.playgroundHistory.filter((conversation) => conversation.id !== id);
+  if (state.selectedConversationId === id) state.selectedConversationId = null;
   savePlaygroundState();
   await renderPlayground();
   showToast("Playground conversation deleted.", "success");
@@ -1482,7 +1527,8 @@ async function deletePlaygroundConversation(id) {
 
 function applySidebarState() {
   $("#app-shell").classList.toggle("nav-collapsed", state.sidebarCollapsed);
-  $("#sidebar-toggle").textContent = state.sidebarCollapsed ? "Show nav" : "Hide nav";
+  $("#sidebar-toggle").textContent = state.sidebarCollapsed ? ">>" : "<<";
+  $("#sidebar-toggle").title = state.sidebarCollapsed ? "Show navigation" : "Hide navigation";
 }
 
 function slugify(value) {
