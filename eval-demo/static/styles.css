@@ -769,16 +769,52 @@ h3 {
   gap: 14px;
 }
 
+.judge-lab-layout {
+  align-items: start;
+}
+
+.judge-run-form {
+  gap: 12px;
+}
+
+.judge-run-form .panel-header {
+  margin-bottom: 0;
+}
+
+.judge-run-form .muted {
+  line-height: 1.35;
+}
+
+.judge-field-grid {
+  gap: 10px;
+}
+
+.judge-run-form input,
+.judge-run-form select {
+  min-height: 36px;
+}
+
+.judge-connect-button {
+  width: max-content;
+  justify-self: end;
+}
+
 .scorer-editor-list {
   display: grid;
-  gap: 12px;
+  gap: 10px;
+}
+
+.judge-run-form .scorer-editor-list {
+  max-height: 520px;
+  overflow: auto;
+  padding-right: 4px;
 }
 
 .scorer-editor {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fbfcfc;
-  padding: 12px;
+  padding: 10px;
 }
 
 .scorer-toggle {
@@ -786,7 +822,7 @@ h3 {
   align-items: center;
   gap: 8px;
   color: var(--ink);
-  margin-bottom: 8px;
+  margin-bottom: 7px;
 }
 
 .scorer-toggle input {
@@ -795,7 +831,32 @@ h3 {
 }
 
 .scorer-editor textarea {
-  min-height: 118px;
+  min-height: 86px;
+  max-height: 180px;
+}
+
+.judge-action-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), #ffffff);
+  margin: 2px -18px -18px;
+  padding: 12px 18px 16px;
+  border-radius: 0 0 8px 8px;
+}
+
+.judge-action-bar .primary-button {
+  min-width: 180px;
+}
+
+.judge-side-panel {
+  display: grid;
+  gap: 12px;
 }
 
 .judge-run-row {
@@ -1010,5 +1071,24 @@ textarea {
 
   .nav {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (min-width: 860px) {
+  .judge-lab-layout {
+    grid-template-columns: minmax(0, 1.08fr) minmax(320px, 0.92fr);
+  }
+}
+
+@media (max-width: 680px) {
+  .judge-action-bar {
+    display: grid;
+    margin-left: -18px;
+    margin-right: -18px;
+  }
+
+  .judge-action-bar .primary-button,
+  .judge-connect-button {
+    width: 100%;
   }
 }

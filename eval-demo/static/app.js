@@ -645,24 +645,26 @@ async function renderJudgeLab() {
   const judgeDefinitions = activeJudgeDefinitions();
   const selectedJudge = state.selectedJudgeRunId ? await api(`/api/judge-runs/${state.selectedJudgeRunId}`) : null;
   $("#judge-view").innerHTML = `
-    <div class="layout-two">
-      <form class="panel judge-form" id="judge-form">
+    <div class="layout-two judge-lab-layout">
+      <form class="panel judge-form judge-run-form" id="judge-form">
         <div class="panel-header">
           <div>
             <h2>Run LLM-as-Judge</h2>
             <p class="muted">Select an eval run, choose judge scorers, edit prompts, and score examples with an OpenAI judge model.</p>
           </div>
         </div>
-        <label>
-          Source eval run
-          <select name="sourceRunId">
-            ${state.runs.map((run) => `<option value="${run.id}">${run.name} - ${run.model}</option>`).join("")}
-          </select>
-        </label>
-        <label>
-          Judge run name
-          <input name="name" value="LLM judge quality check" />
-        </label>
+        <div class="field-grid judge-field-grid">
+          <label>
+            Source eval run
+            <select name="sourceRunId">
+              ${state.runs.map((run) => `<option value="${run.id}">${run.name} - ${run.model}</option>`).join("")}
+            </select>
+          </label>
+          <label>
+            Judge run name
+            <input name="name" value="LLM judge quality check" />
+          </label>
+        </div>
         <div class="field-grid">
           <label>
             Judge model
@@ -675,15 +677,17 @@ async function renderJudgeLab() {
             <input name="maxExamples" type="number" min="1" max="25" value="5" />
           </label>
         </div>
-        <label>
-          Custom judge model or checkpoint ID
-          <input name="customJudgeModel" placeholder="Optional, e.g. ft:gpt-4.1-mini:..." />
-        </label>
-        <label>
-          OpenAI API key
-          <input name="apiKey" type="password" autocomplete="off" placeholder="Paste key or connect in New eval run first" value="${escapeHtml(sessionStorage.getItem("evalopsOpenAIKey") || "")}" />
-        </label>
-        <button class="ghost-button full-width" type="button" onclick="connectOpenAIModels()">Connect OpenAI and refresh judge models</button>
+        <div class="field-grid judge-field-grid">
+          <label>
+            Custom judge model or checkpoint ID
+            <input name="customJudgeModel" placeholder="Optional, e.g. ft:gpt-4.1-mini:..." />
+          </label>
+          <label>
+            OpenAI API key
+            <input name="apiKey" type="password" autocomplete="off" placeholder="Paste key or connect in New eval run first" value="${escapeHtml(sessionStorage.getItem("evalopsOpenAIKey") || "")}" />
+          </label>
+        </div>
+        <button class="ghost-button judge-connect-button" type="button" onclick="connectOpenAIModels()">Connect OpenAI and refresh judge models</button>
         <div class="scorer-editor-list">
           ${judgeDefinitions.map((scorer) => `
             <section class="scorer-editor">
@@ -695,9 +699,12 @@ async function renderJudgeLab() {
             </section>
           `).join("")}
         </div>
-        <button class="primary-button full-width" type="submit">Run LLM-as-Judge</button>
+        <div class="judge-action-bar">
+          <span class="muted">Runs selected scorers on the eval examples above.</span>
+          <button class="primary-button" type="submit">Run LLM-as-Judge</button>
+        </div>
       </form>
-      <div class="panel">
+      <div class="panel judge-side-panel">
         <div class="panel-header">
           <div>
             <h2>LLM-as-Judge scorers</h2>
