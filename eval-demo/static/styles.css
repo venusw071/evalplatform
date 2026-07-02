@@ -557,11 +557,19 @@ h3 {
 }
 
 .table-actions,
-.column-toolbar {
+.column-toolbar,
+.dataset-edit-row,
+.judge-filter-row {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
+}
+
+.dataset-edit-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.7fr) minmax(220px, 1fr) auto;
+  margin-bottom: 12px;
 }
 
 .column-toolbar {
@@ -915,6 +923,18 @@ h3 {
   padding: 12px;
 }
 
+.judge-filter-row {
+  margin: 2px 0 4px;
+}
+
+.source-run-results {
+  display: grid;
+  gap: 14px;
+  border-top: 1px solid var(--line);
+  margin-top: 8px;
+  padding-top: 16px;
+}
+
 .judge-run-row span {
   color: var(--muted);
   font-size: 12px;
@@ -1047,6 +1067,7 @@ textarea {
   .comparison-grid,
   .run-top-grid,
   .summary-card-grid,
+  .dataset-edit-row,
   .judge-card,
   .history-item {
     grid-template-columns: 1fr;

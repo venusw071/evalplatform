@@ -20,6 +20,7 @@ const state = {
   playgroundHistory: [],
   savedPrompts: [],
   selectedConversationId: null,
+  selectedJudgeScorer: "",
 };
 
 const DEFAULT_JUDGE_SCORERS = [
@@ -332,6 +333,7 @@ async function renderDashboard() {
       </div>
       ${detail ? renderDashboardRun(detail) : "<p class='muted'>Create an eval run to inspect results.</p>"}
       ${detail && compareDetail ? renderRunComparison(detail, compareDetail) : ""}
+      ${detail ? renderDashboardSamples(detail) : ""}
     </div>
     <div class="table-panel">
       <div class="panel-header">
@@ -386,9 +388,14 @@ function renderDashboardRun(detail) {
           </div>
         `).join("") || "<p class='muted'>No scorer scores available yet.</p>"}
       </div>
-      <div class="result-list compact-results">
-        ${detail.results.slice(0, 2).map(renderResultCard).join("")}
-      </div>
+    </div>
+  `;
+}
+
+function renderDashboardSamples(detail) {
+  return `
+    <div class="result-list compact-results">
+      ${detail.results.slice(0, 2).map(renderResultCard).join("")}
     </div>
   `;
 }
@@ -546,6 +553,17 @@ function renderDatasetDetail(detail) {
         </div>
         <span class="status good">${detail.dataset.example_count} examples</span>
       </div>
+      <div class="dataset-edit-row">
+        <label>
+          Dataset name
+          <input id="dataset-name-input" value="${escapeHtml(detail.dataset.name)}" />
+        </label>
+        <label>
+          Description
+          <input id="dataset-description-input" value="${escapeHtml(detail.dataset.description)}" />
+        </label>
+        <button class="row-button" onclick="updateDatasetMetadata('${detail.dataset.id}')">Save dataset</button>
+      </div>
       <div class="column-toolbar">
         <span class="muted">Manage tags and optional columns</span>
         <input id="custom-tag-input" class="inline-input" placeholder="Add custom tag" />
@@ -644,6 +662,7 @@ async function renderJudgeLab() {
   state.judgeDefinitions = loadJudgeDefinitions(lab.judgeDefinitions?.length ? lab.judgeDefinitions : DEFAULT_JUDGE_SCORERS);
   const judgeDefinitions = activeJudgeDefinitions();
   const selectedJudge = state.selectedJudgeRunId ? await api(`/api/judge-runs/${state.selectedJudgeRunId}`) : null;
+  const selectedJudgeSource = selectedJudge?.judgeRun?.source_run_id ? await api(`/api/eval-runs/${selectedJudge.judgeRun.source_run_id}?limit=12&preview=0`) : null;
   $("#judge-view").innerHTML = `
     <div class="layout-two judge-lab-layout">
       <form class="panel judge-form judge-run-form" id="judge-form">
@@ -655,10 +674,35 @@ async function renderJudgeLab() {
         </div>
         <div class="field-grid judge-field-grid">
           <label>
-            Source eval run
-            <select name="sourceRunId">
-              ${state.runs.map((run) => `<option value="${run.id}">${run.name} - ${run.model}</option>`).join("")}
+            Dataset to evaluate
+            <select name="datasetId">
+              ${state.datasets.map((dataset) => `<option value="${escapeHtml(dataset.id)}">${escapeHtml(dataset.name)}</option>`).join("")}
             </select>
+          </label>
+          <label>
+            Eval run name
+            <input name="evalRunName" value="Judge dataset eval run" />
+          </label>
+        </div>
+        <div class="field-grid judge-field-grid">
+          <label>
+            Target model for new eval run
+            <select name="targetModel">
+              ${state.localModels.map((model) => `<option value="${escapeHtml(model.id)}">${escapeHtml(model.name)}</option>`).join("")}
+            </select>
+          </label>
+          <label>
+            Existing eval run
+            <select name="sourceRunId">
+              <option value="">Create new eval run from selected dataset</option>
+              ${state.runs.map((run) => `<option value="${escapeHtml(run.id)}">${escapeHtml(run.name)} - ${escapeHtml(run.model)}</option>`).join("")}
+            </select>
+          </label>
+        </div>
+        <div class="field-grid judge-field-grid">
+          <label>
+            Eval prompt version
+            <input name="evalPromptVersion" value="judge-generated-v1" />
           </label>
           <label>
             Judge run name
@@ -732,12 +776,13 @@ async function renderJudgeLab() {
             <button class="judge-run-row ${state.selectedJudgeRunId === run.id ? "active" : ""}" onclick="inspectJudgeRun('${run.id}')">
               <strong>${run.name}</strong>
               <span>${formatScore(run.avg_score)} score / ${formatPct(run.pass_rate)} pass</span>
+              <span>${judgeRunScorerNames(run).map((name) => escapeHtml(name)).join(" / ") || "No scorers"}</span>
             </button>
           `).join("") || "<p class='muted'>No judge runs yet.</p>"}
         </div>
       </div>
     </div>
-    ${selectedJudge ? renderJudgeDetail(selectedJudge) : ""}
+    ${selectedJudge ? renderJudgeDetail(selectedJudge, selectedJudgeSource) : ""}
   `;
   bindJudgeForm();
 }
@@ -971,7 +1016,10 @@ function runJudgeSummary(run) {
   `;
 }
 
-function renderJudgeDetail(detail) {
+function renderJudgeDetail(detail, sourceDetail = null) {
+  const scorerNames = Array.from(new Set(detail.results.map((result) => result.scorer_name || "Overall Quality"))).sort();
+  if (state.selectedJudgeScorer && !scorerNames.includes(state.selectedJudgeScorer)) state.selectedJudgeScorer = "";
+  const visibleResults = state.selectedJudgeScorer ? detail.results.filter((result) => (result.scorer_name || "Overall Quality") === state.selectedJudgeScorer) : detail.results;
   return `
     <div class="detail-panel run-detail">
       <div class="panel-header">
@@ -984,8 +1032,24 @@ function renderJudgeDetail(detail) {
       <div class="summary-card-grid">
         <div class="summary-card"><span>Judge score</span><strong>${formatScore(detail.judgeRun.avg_score)}</strong><small>${formatPct(detail.judgeRun.pass_rate)} pass rate</small></div>
         <div class="summary-card"><span>Scored rows</span><strong>${detail.judgeRun.example_count}</strong><small>Click each row to expand prompt, expected answer, and model output.</small></div>
+        ${sourceDetail ? `<div class="summary-card"><span>Source eval run</span><strong>${formatScore(sourceDetail.run.avg_score)}</strong><small>${escapeHtml(sourceDetail.run.name)}</small></div>` : ""}
       </div>
-      ${detail.results.map(renderJudgeResultCard).join("")}
+      <div class="judge-filter-row">
+        <button class="tag-button ${state.selectedJudgeScorer ? "" : "active"}" onclick="selectJudgeScorer('')">All judge scores</button>
+        ${scorerNames.map((name) => `<button class="tag-button ${state.selectedJudgeScorer === name ? "active" : ""}" onclick="selectJudgeScorer('${escapeJs(name)}')">${escapeHtml(name)}</button>`).join("")}
+      </div>
+      ${visibleResults.map(renderJudgeResultCard).join("")}
+      ${sourceDetail ? `
+        <div class="source-run-results">
+          <div class="panel-header">
+            <div>
+              <h3>Source eval run result</h3>
+              <p class="muted">The eval run that was judged by this LLM-as-Judge run.</p>
+            </div>
+          </div>
+          ${sourceDetail.results.slice(0, 6).map(renderResultCard).join("")}
+        </div>
+      ` : ""}
     </div>
   `;
 }
@@ -1102,6 +1166,12 @@ async function inspectRun(runId) {
 
 async function inspectJudgeRun(judgeRunId) {
   state.selectedJudgeRunId = judgeRunId;
+  state.selectedJudgeScorer = "";
+  await renderJudgeLab();
+}
+
+async function selectJudgeScorer(name) {
+  state.selectedJudgeScorer = name;
   await renderJudgeLab();
 }
 
@@ -1189,6 +1259,27 @@ async function clearDatasetColumn(datasetId, column) {
   }
 }
 
+async function updateDatasetMetadata(datasetId) {
+  const name = $("#dataset-name-input")?.value?.trim();
+  const description = $("#dataset-description-input")?.value?.trim();
+  if (!name && !description) {
+    showToast("Enter a dataset name or description first.", "error");
+    return;
+  }
+  try {
+    await api(`/api/datasets/${datasetId}/metadata`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, description }),
+    });
+    await loadCoreData();
+    await renderDatasets();
+    showToast("Dataset updated.", "success");
+  } catch (error) {
+    showToast(error.message, "error");
+  }
+}
+
 async function addDatasetTag(datasetId) {
   const input = $("#custom-tag-input");
   const tag = input?.value?.trim();
@@ -1270,7 +1361,29 @@ function bindJudgeForm() {
       return;
     }
     try {
-      setBusy(submitButton, true, "Judging...");
+      setBusy(submitButton, true, data.sourceRunId ? "Judging..." : "Creating eval run...");
+      if (!data.sourceRunId) {
+        const evalRun = await api("/api/eval-runs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: data.evalRunName || "Judge dataset eval run",
+            datasetId: data.datasetId,
+            provider: "local",
+            model: data.targetModel || state.localModels[0]?.id || "local-helpful",
+            promptVersion: data.evalPromptVersion || "judge-generated-v1",
+            runType: "Custom Eval",
+            maxExamples: data.maxExamples || "5",
+          }),
+        });
+        data.sourceRunId = evalRun.run.id;
+        state.selectedRunId = evalRun.run.id;
+        setBusy(submitButton, true, "Judging...");
+      }
+      delete data.datasetId;
+      delete data.evalRunName;
+      delete data.targetModel;
+      delete data.evalPromptVersion;
       const created = await api("/api/judge-runs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1278,6 +1391,7 @@ function bindJudgeForm() {
       });
       form.elements.apiKey.value = "";
       state.selectedJudgeRunId = created.judgeRun.id;
+      state.selectedJudgeScorer = "";
       await loadCoreData();
       await renderJudgeLab();
       showToast(`Judge run completed: ${formatScore(created.judgeRun.avg_score)} average score.`, "success");
@@ -1452,6 +1566,18 @@ function scorerAverages(results) {
     });
   });
   return Array.from(byName.values()).map((item) => ({ ...item, avg: item.count ? item.total / item.count : 0 }));
+}
+
+function judgeRunScorerNames(run) {
+  const prompt = String(run?.judge_prompt || "");
+  const names = [];
+  const pattern = /(?:^|\n\n)([^:\n]{2,80}):\n/g;
+  let match = pattern.exec(prompt);
+  while (match) {
+    names.push(match[1].trim());
+    match = pattern.exec(prompt);
+  }
+  return Array.from(new Set(names)).slice(0, 5);
 }
 
 function latestJudgeForRun(runId) {

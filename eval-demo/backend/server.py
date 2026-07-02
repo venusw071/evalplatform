@@ -821,6 +821,27 @@ def update_dataset_tags(conn, dataset_id, tags, action="add"):
     conn.commit()
 
 
+def update_dataset_metadata(conn, dataset_id, payload):
+    dataset = conn.execute("select id from datasets where id = ?", (dataset_id,)).fetchone()
+    if not dataset:
+        raise ValueError("Dataset not found.")
+    name = str(payload.get("name") or "").strip()
+    description = str(payload.get("description") or "").strip()
+    updates = []
+    values = []
+    if name:
+        updates.append("name = ?")
+        values.append(name[:120])
+    if description:
+        updates.append("description = ?")
+        values.append(description[:500])
+    if not updates:
+        raise ValueError("Add a dataset name or description to update.")
+    values.append(dataset_id)
+    conn.execute(f"update datasets set {', '.join(updates)} where id = ?", values)
+    conn.commit()
+
+
 def update_judge_run(conn, judge_run_id, payload):
     judge_run = conn.execute("select id from judge_runs where id = ?", (judge_run_id,)).fetchone()
     if not judge_run:
@@ -902,6 +923,18 @@ class Handler(SimpleHTTPRequestHandler):
             try:
                 with connect() as conn:
                     update_dataset_tags(conn, dataset_id, payload.get("tags"), payload.get("action") or "add")
+                    dataset = conn.execute("select * from datasets where id = ?", (dataset_id,)).fetchone()
+                self.send_json(row_to_dict(dataset))
+            except ValueError as exc:
+                self.send_json({"error": str(exc)}, 400)
+            return
+        if parsed.path.startswith("/api/datasets/") and parsed.path.endswith("/metadata"):
+            length = int(self.headers.get("Content-Length", "0"))
+            payload = json.loads(self.rfile.read(length) or "{}")
+            dataset_id = parsed.path.split("/")[-2]
+            try:
+                with connect() as conn:
+                    update_dataset_metadata(conn, dataset_id, payload)
                     dataset = conn.execute("select * from datasets where id = ?", (dataset_id,)).fetchone()
                 self.send_json(row_to_dict(dataset))
             except ValueError as exc:
