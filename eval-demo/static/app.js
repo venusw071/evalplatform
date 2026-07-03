@@ -21,6 +21,9 @@ const state = {
   savedPrompts: [],
   selectedConversationId: null,
   selectedJudgeScorer: "",
+  agentConfigs: [],
+  agentRuns: [],
+  selectedAgentRunId: null,
 };
 
 const DEFAULT_JUDGE_SCORERS = [
@@ -56,6 +59,7 @@ const pageTitles = {
   datasets: "Datasets",
   runs: "Eval Runs",
   judge: "LLM-as-Judge",
+  agentic: "Agentic Evals",
   playground: "Playground",
 };
 
@@ -263,17 +267,21 @@ function bindDialog() {
 }
 
 async function loadCoreData() {
-  const [datasets, runs, judgeRuns, localModels] = await Promise.all([api("/api/datasets"), api("/api/eval-runs"), api("/api/judge-runs"), api("/api/local-models")]);
+  const [datasets, runs, judgeRuns, localModels, agentConfigs, agentRuns] = await Promise.all([api("/api/datasets"), api("/api/eval-runs"), api("/api/judge-runs"), api("/api/local-models"), api("/api/agent-configs"), api("/api/agent-runs")]);
   state.datasets = datasets;
   state.runs = runs;
   state.judgeRuns = judgeRuns;
   state.localModels = localModels;
+  state.agentConfigs = agentConfigs;
+  state.agentRuns = agentRuns;
   if ((!state.selectedRunId || !runs.some((run) => run.id === state.selectedRunId)) && runs.length) state.selectedRunId = runs[0].id;
   if ((!state.dashboardRunId || !runs.some((run) => run.id === state.dashboardRunId)) && runs.length) state.dashboardRunId = runs[0].id;
   if ((!state.selectedJudgeRunId || !judgeRuns.some((run) => run.id === state.selectedJudgeRunId)) && judgeRuns.length) state.selectedJudgeRunId = judgeRuns[0].id;
+  if ((!state.selectedAgentRunId || !agentRuns.some((run) => run.id === state.selectedAgentRunId)) && agentRuns.length) state.selectedAgentRunId = agentRuns[0].id;
   if (!runs.length) state.selectedRunId = null;
   if (!runs.length) state.dashboardRunId = null;
   if (!judgeRuns.length) state.selectedJudgeRunId = null;
+  if (!agentRuns.length) state.selectedAgentRunId = null;
   if ((!state.selectedDatasetId || !datasets.some((dataset) => dataset.id === state.selectedDatasetId)) && datasets.length) {
     state.selectedDatasetId = datasets[0].id;
   }
@@ -289,6 +297,7 @@ async function renderActiveView() {
   if (state.view === "datasets") await renderDatasets();
   if (state.view === "runs") await renderRuns();
   if (state.view === "judge") await renderJudgeLab();
+  if (state.view === "agentic") await renderAgenticEvals();
   if (state.view === "playground") await renderPlayground();
 }
 
@@ -787,6 +796,160 @@ async function renderJudgeLab() {
   bindJudgeForm();
 }
 
+async function renderAgenticEvals() {
+  const selectedRun = state.selectedAgentRunId ? await api(`/api/agent-runs/${state.selectedAgentRunId}`) : null;
+  const defaultConfig = state.agentConfigs[0] || {};
+  $("#agentic-view").innerHTML = `
+    <div class="layout-two agentic-layout">
+      <form class="panel judge-form" id="agentic-form">
+        <div class="panel-header">
+          <div>
+            <h2>Agentic coding eval</h2>
+            <p class="muted">Run a demo-safe coding agent with an ephemeral Python sandbox, trace capture, code output, and deterministic scorers.</p>
+          </div>
+        </div>
+        <label>
+          Eval config
+          <select name="configId" id="agent-config-select">
+            ${state.agentConfigs.map((config) => `<option value="${escapeHtml(config.id)}">${escapeHtml(config.name)}</option>`).join("")}
+          </select>
+        </label>
+        <div class="field-grid">
+          <label>
+            Config name
+            <input name="name" value="${escapeHtml(defaultConfig.name || "Agentic coding eval - demo safe")}" />
+          </label>
+          <label>
+            Dataset
+            <select name="datasetId">
+              ${state.datasets.map((dataset) => `<option value="${escapeHtml(dataset.id)}" ${defaultConfig.dataset_id === dataset.id ? "selected" : ""}>${escapeHtml(dataset.name)}</option>`).join("")}
+            </select>
+          </label>
+        </div>
+        <div class="field-grid">
+          <label>
+            Agent model
+            <select name="model">
+              ${state.localModels.map((model) => `<option value="${escapeHtml(model.id)}" ${defaultConfig.model === model.id ? "selected" : ""}>${escapeHtml(model.name)}</option>`).join("")}
+            </select>
+          </label>
+          <label>
+            Max examples
+            <input name="maxExamples" type="number" min="1" max="10" value="3" />
+          </label>
+        </div>
+        <div class="field-grid">
+          <label>
+            Max turns
+            <input name="maxTurns" type="number" min="1" max="12" value="${defaultConfig.max_turns || 4}" />
+          </label>
+          <label>
+            Code timeout seconds
+            <input name="timeoutSeconds" type="number" min="1" max="20" value="${defaultConfig.timeout_seconds || 5}" />
+          </label>
+        </div>
+        <label>
+          System prompt
+          <textarea name="systemPrompt">${escapeHtml(defaultConfig.system_prompt || "You are a coding agent. Read the task, write a small Python solution, run a focused test, and report the result with concise reasoning.")}</textarea>
+        </label>
+        <div class="agentic-switch-grid">
+          <label><input type="checkbox" checked disabled /> Code execution</label>
+          <label><input type="checkbox" checked disabled /> Ephemeral files</label>
+          <label><input type="checkbox" disabled /> Shell disabled</label>
+          <label><input type="checkbox" disabled /> Network disabled</label>
+        </div>
+        <div class="judge-action-bar">
+          <span class="muted">Creates a reusable config, runs each row through the demo agent, and saves traces/artifacts.</span>
+          <button class="primary-button" type="submit">Run agentic eval</button>
+        </div>
+      </form>
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <h2>Agent runs</h2>
+            <p class="muted">Inspect code, tool logs, artifacts, and scorer output.</p>
+          </div>
+        </div>
+        <div class="bar-list compact-list">
+          ${state.agentRuns.slice(0, 8).map((run) => `
+            <button class="judge-run-row ${state.selectedAgentRunId === run.id ? "active" : ""}" onclick="inspectAgentRun('${run.id}')">
+              <strong>${escapeHtml(run.name)}</strong>
+              <span>${formatScore(run.avg_score)} score / ${formatPct(run.pass_rate)} pass / ${run.failure_count} failures</span>
+            </button>
+          `).join("") || "<p class='muted'>No agent runs yet.</p>"}
+        </div>
+      </div>
+    </div>
+    ${selectedRun ? renderAgentRunDetail(selectedRun) : ""}
+  `;
+  bindAgenticForm();
+}
+
+function renderAgentRunDetail(detail) {
+  const run = detail.agentRun;
+  return `
+    <div class="detail-panel run-detail">
+      <div class="panel-header">
+        <div>
+          <h2>${escapeHtml(run.name)}</h2>
+          <p class="muted">${escapeHtml(detail.config.name)} / ${escapeHtml(detail.config.model)} / ${escapeHtml(detail.config.environment.type)}</p>
+        </div>
+        <span class="status ${run.pass_rate >= 0.7 ? "good" : "warn"}">${formatScore(run.avg_score)}</span>
+      </div>
+      <div class="summary-card-grid">
+        <div class="summary-card"><span>Pass rate</span><strong>${formatPct(run.pass_rate)}</strong><small>${run.failure_count} examples need review</small></div>
+        <div class="summary-card"><span>Latency</span><strong>${Math.round(run.latency_ms)}ms</strong><small>Average per task</small></div>
+        <div class="summary-card"><span>Environment</span><strong>Python</strong><small>${detail.config.environment.filesystem}</small></div>
+        <div class="summary-card"><span>Tools</span><strong>${Object.values(detail.config.tools).filter(Boolean).length}</strong><small>Code + ephemeral files</small></div>
+      </div>
+      ${detail.results.map(renderAgentResultCard).join("")}
+    </div>
+  `;
+}
+
+function renderAgentResultCard(result) {
+  return `
+    <article class="result-card">
+      <div class="panel-header">
+        <div>
+          <h3>${escapeHtml(result.example_id)}: ${clip(result.input, 150)}</h3>
+          <p class="muted">${escapeHtml(result.final_answer)}</p>
+        </div>
+        <span class="status ${result.passed ? "good" : "bad"}">${result.passed ? "pass" : "review"}</span>
+      </div>
+      <div class="result-grid">
+        ${expandableBlock("Task input", result.input, 260)}
+        ${expandableBlock("Expected", result.expected, 220)}
+        ${expandableBlock("Generated code", result.code, 360)}
+        ${expandableBlock("Execution output", `STDOUT:\n${result.stdout || "(empty)"}\n\nSTDERR:\n${result.stderr || "(empty)"}`, 320)}
+      </div>
+      <div class="trace-list">
+        ${result.trace.map((step) => `
+          <div class="trace-step">
+            <span class="status ${step.status === "failed" ? "bad" : "good"}">${escapeHtml(step.kind)}</span>
+            <strong>${escapeHtml(step.step)}</strong>
+            <div class="trace-message">
+              ${String(step.message || "").length > 140 ? expandableBlock("Message", step.message, 140) : `<span class="muted">${escapeHtml(step.message)}</span>`}
+              <span class="muted">${step.durationMs}ms</span>
+            </div>
+          </div>
+        `).join("")}
+      </div>
+      <div class="score-grid">
+        ${result.scorer_results.map((score) => `
+          <div class="score-pill">
+            <strong>${escapeHtml(score.scorer)}: ${formatScore(score.score)}</strong>
+            <span>${escapeHtml(score.rationale)}</span>
+          </div>
+        `).join("")}
+      </div>
+      <div class="artifact-list">
+        ${result.artifacts.map((artifact) => expandableBlock(`Artifact: ${artifact.name}`, artifact.content, 260)).join("")}
+      </div>
+    </article>
+  `;
+}
+
 async function renderPlayground() {
   const selectedPrompt = state.savedPrompts.find((prompt) => prompt.id === state.selectedPromptId) || state.savedPrompts[0] || defaultSystemPrompt();
   const selectedConversation = state.playgroundHistory.find((item) => item.id === state.selectedConversationId) || null;
@@ -1170,6 +1333,11 @@ async function inspectJudgeRun(judgeRunId) {
   await renderJudgeLab();
 }
 
+async function inspectAgentRun(runId) {
+  state.selectedAgentRunId = runId;
+  await renderAgenticEvals();
+}
+
 async function selectJudgeScorer(name) {
   state.selectedJudgeScorer = name;
   await renderJudgeLab();
@@ -1465,6 +1633,42 @@ function bindPlaygroundForm() {
       showToast(error.message, "error");
     } finally {
       setBusy(submitButton, false, "Generate output");
+    }
+  });
+}
+
+function bindAgenticForm() {
+  const form = $("#agentic-form");
+  if (!form) return;
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const submitButton = form.querySelector('button[type="submit"]');
+    const data = Object.fromEntries(new FormData(form).entries());
+    try {
+      setBusy(submitButton, true, "Saving config...");
+      const config = await api("/api/agent-configs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      setBusy(submitButton, true, "Running agent...");
+      const run = await api("/api/agent-runs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          configId: config.id,
+          name: `${data.name || "Agentic coding eval"} run`,
+          maxExamples: data.maxExamples || "3",
+        }),
+      });
+      state.selectedAgentRunId = run.agentRun.id;
+      await loadCoreData();
+      await renderAgenticEvals();
+      showToast(`Agentic eval completed: ${formatScore(run.agentRun.avg_score)} average score.`, "success");
+    } catch (error) {
+      showToast(error.message, "error");
+    } finally {
+      setBusy(submitButton, false, "Run agentic eval");
     }
   });
 }

@@ -7,6 +7,8 @@ import random
 import re
 import sqlite3
 import time
+import subprocess
+import tempfile
 import urllib.error
 import urllib.request
 
@@ -40,7 +42,7 @@ def now_ms():
 
 def row_to_dict(row):
     data = dict(row)
-    for key in ("tags", "scorer_results", "trace", "metadata", "raw"):
+    for key in ("tags", "scorer_results", "trace", "metadata", "raw", "environment", "tools", "scorers", "artifacts"):
         if key in data and isinstance(data[key], str):
             data[key] = json.loads(data[key])
     return data
@@ -148,6 +150,54 @@ def init_db():
                 foreign key(judge_run_id) references judge_runs(id),
                 foreign key(eval_result_id) references eval_results(id)
             );
+
+            create table if not exists agent_configs (
+                id text primary key,
+                name text not null,
+                dataset_id text not null,
+                model text not null,
+                system_prompt text not null,
+                environment text not null,
+                tools text not null,
+                scorers text not null,
+                max_turns integer not null,
+                timeout_seconds integer not null,
+                created_at integer not null,
+                foreign key(dataset_id) references datasets(id)
+            );
+
+            create table if not exists agent_runs (
+                id text primary key,
+                config_id text not null,
+                name text not null,
+                status text not null,
+                created_at integer not null,
+                completed_at integer,
+                avg_score real not null,
+                pass_rate real not null,
+                failure_count integer not null,
+                latency_ms integer not null,
+                foreign key(config_id) references agent_configs(id)
+            );
+
+            create table if not exists agent_results (
+                id text primary key,
+                agent_run_id text not null,
+                example_id text not null,
+                input text not null,
+                expected text not null,
+                final_answer text not null,
+                code text not null,
+                stdout text not null,
+                stderr text not null,
+                trace text not null,
+                scorer_results text not null,
+                artifacts text not null,
+                latency_ms integer not null,
+                passed integer not null,
+                foreign key(agent_run_id) references agent_runs(id),
+                foreign key(example_id) references examples(id)
+            );
             """
         )
         columns = {row["name"] for row in conn.execute("pragma table_info(judge_results)").fetchall()}
@@ -160,6 +210,11 @@ def init_db():
         existing = conn.execute("select count(*) as count from datasets").fetchone()["count"]
         if existing == 0:
             seed(conn)
+        seed_agentic_coding_dataset(conn)
+        existing_agent_configs = conn.execute("select count(*) as count from agent_configs").fetchone()["count"]
+        if existing_agent_configs == 0:
+            seed_agent_config(conn)
+        repair_agent_configs(conn)
 
 
 def seed(conn):
@@ -233,6 +288,114 @@ def seed(conn):
     create_run(conn, "Release baseline - v1", "release-general", "gpt-demo-v1", "release-prompt-17", "Release Eval", created + 60000)
     create_run(conn, "Product logs weekly sample", "product-log-sample", "gpt-demo-v1", "support-prompt-08", "Product Log Eval", created + 180000)
     create_run(conn, "Enterprise edge cases - candidate", "custom-enterprise", "gpt-demo-v2", "enterprise-prompt-03", "Custom Eval", created + 260000)
+
+
+def seed_agent_config(conn):
+    created = now_ms()
+    dataset = conn.execute("select id from datasets where id = 'agentic-coding-tasks'").fetchone()
+    dataset_id = dataset["id"] if dataset else "release-general"
+    config = {
+        "id": "agentic-coding-demo",
+        "name": "Agentic coding eval - demo safe",
+        "datasetId": dataset_id,
+        "model": "local-helpful",
+        "systemPrompt": "You are a coding agent. Read the task, write a small Python solution, run a focused test, and report the result with concise reasoning.",
+        "environment": {
+            "type": "demo-python-sandbox",
+            "network": False,
+            "filesystem": "ephemeral per example",
+            "timeoutSeconds": 5,
+        },
+        "tools": {"codeExecution": True, "fileSystem": True, "shell": False, "browser": False},
+        "scorers": ["unit_tests_pass", "task_completion", "code_safety", "efficiency"],
+        "maxTurns": 4,
+        "timeoutSeconds": 5,
+    }
+    conn.execute(
+        "insert into agent_configs values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            config["id"],
+            config["name"],
+            config["datasetId"],
+            config["model"],
+            config["systemPrompt"],
+            json.dumps(config["environment"]),
+            json.dumps(config["tools"]),
+            json.dumps(config["scorers"]),
+            config["maxTurns"],
+            config["timeoutSeconds"],
+            created,
+        ),
+    )
+    conn.commit()
+
+
+def seed_agentic_coding_dataset(conn):
+    exists = conn.execute("select id from datasets where id = 'agentic-coding-tasks'").fetchone()
+    created = now_ms() - 3600000
+    if not exists:
+        examples = [
+            (
+                "agent-code-1",
+                "Write a Python function dedupe_by_email(records) that keeps the first record for each case-insensitive email address.",
+                "Function returns two records for a/A and b@example.com, preserving first-seen order.",
+                ["agentic", "coding", "unit-tests", "medium"],
+                {"language": "python", "skill": "data-cleaning", "hiddenTests": 3},
+            ),
+            (
+                "agent-code-2",
+                "Build a small invoice_to_json(vendor, amount) helper that returns JSON-safe vendor and numeric amount fields.",
+                "Function returns a dict that serializes to JSON and preserves vendor plus float amount.",
+                ["agentic", "coding", "json", "easy"],
+                {"language": "python", "skill": "structured-output", "hiddenTests": 2},
+            ),
+            (
+                "agent-code-3",
+                "Implement solve_task(text) for a support workflow: normalize whitespace and return a short summary payload with status ok.",
+                "Function returns a dict with status ok and a non-empty normalized summary.",
+                ["agentic", "coding", "support", "easy"],
+                {"language": "python", "skill": "string-processing", "hiddenTests": 2},
+            ),
+        ]
+        conn.execute(
+            "insert into datasets (id, name, source, description, example_count, created_at, tags) values (?, ?, ?, ?, ?, ?, ?)",
+            (
+                "agentic-coding-tasks",
+                "Agentic coding tasks",
+                "Demo-safe coding eval",
+                "Small Python coding tasks for testing agent traces, sandboxed execution, artifacts, and deterministic scorers.",
+                len(examples),
+                created,
+                json.dumps(["agentic", "coding", "demo", "python"]),
+            ),
+        )
+        for example_id, input_text, expected, tags, metadata in examples:
+            conn.execute(
+                "insert into examples values (?, ?, ?, ?, ?, ?)",
+                (example_id, "agentic-coding-tasks", input_text, expected, json.dumps(tags), json.dumps(metadata)),
+            )
+    conn.execute(
+        "update agent_configs set dataset_id = ? where id = ?",
+        ("agentic-coding-tasks", "agentic-coding-demo"),
+    )
+    conn.commit()
+
+
+def repair_agent_configs(conn):
+    fallback = conn.execute("select id from datasets order by created_at desc limit 1").fetchone()
+    if not fallback:
+        return
+    rows = conn.execute(
+        """
+        select agent_configs.id
+        from agent_configs
+        left join datasets on datasets.id = agent_configs.dataset_id
+        where datasets.id is null
+        """
+    ).fetchall()
+    for row in rows:
+        conn.execute("update agent_configs set dataset_id = ? where id = ?", (fallback["id"], row["id"]))
+    conn.commit()
 
 
 def score_example(example, model, prompt_version, output_text=None):
@@ -643,6 +806,221 @@ def create_judge_run(conn, payload):
     return judge_run_id
 
 
+def create_agent_config(conn, payload):
+    created_at = now_ms()
+    name = str(payload.get("name") or "Agentic coding eval").strip()
+    dataset_id = payload.get("datasetId") or "release-general"
+    model = payload.get("model") or "local-helpful"
+    system_prompt = str(payload.get("systemPrompt") or "You are a coding agent. Solve the task and run a focused test.").strip()
+    environment = {
+        "type": payload.get("environmentType") or "demo-python-sandbox",
+        "network": bool(payload.get("network", False)),
+        "filesystem": "ephemeral per example",
+        "timeoutSeconds": int(payload.get("timeoutSeconds") or 5),
+    }
+    tools = {
+        "codeExecution": True,
+        "fileSystem": True,
+        "shell": False,
+        "browser": bool(payload.get("browser", False)),
+    }
+    scorers = payload.get("scorers") if isinstance(payload.get("scorers"), list) else ["unit_tests_pass", "task_completion", "code_safety", "efficiency"]
+    config_id = f"agent-config-{created_at}-{random.randint(100, 999)}"
+    conn.execute(
+        "insert into agent_configs values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            config_id,
+            name[:120],
+            dataset_id,
+            model,
+            system_prompt[:3000],
+            json.dumps(environment),
+            json.dumps(tools),
+            json.dumps(scorers),
+            max(1, min(int(payload.get("maxTurns") or 4), 12)),
+            max(1, min(int(payload.get("timeoutSeconds") or 5), 20)),
+            created_at,
+        ),
+    )
+    conn.commit()
+    return config_id
+
+
+def create_agent_run(conn, payload):
+    config_id = payload.get("configId")
+    config = conn.execute("select * from agent_configs where id = ?", (config_id,)).fetchone()
+    if not config:
+        raise ValueError("Agent eval config not found.")
+    config_data = row_to_dict(config)
+    max_examples = max(1, min(int(payload.get("maxExamples") or 3), 10))
+    examples = conn.execute("select * from examples where dataset_id = ? order by id limit ?", (config_data["dataset_id"], max_examples)).fetchall()
+    if not examples:
+        raise ValueError("Selected config dataset has no examples.")
+    created_at = now_ms()
+    run_id = f"agent-run-{created_at}-{random.randint(100, 999)}"
+    name = payload.get("name") or f"{config_data['name']} run"
+    conn.execute(
+        "insert into agent_runs values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (run_id, config_id, name, "running", created_at, None, 0, 0, 0, 0),
+    )
+    conn.commit()
+    scores = []
+    failures = 0
+    total_latency = 0
+    for example in examples:
+        result = run_agent_example(config_data, row_to_dict(example), run_id)
+        total_latency += result["latency_ms"]
+        scores.extend(item["score"] for item in result["scorer_results"])
+        failures += 0 if result["passed"] else 1
+        conn.execute(
+            "insert into agent_results values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                f"{run_id}-{example['id']}",
+                run_id,
+                example["id"],
+                result["input"],
+                result["expected"],
+                result["final_answer"],
+                result["code"],
+                result["stdout"],
+                result["stderr"],
+                json.dumps(result["trace"]),
+                json.dumps(result["scorer_results"]),
+                json.dumps(result["artifacts"]),
+                result["latency_ms"],
+                1 if result["passed"] else 0,
+            ),
+        )
+        conn.commit()
+    avg_score = round(sum(scores) / max(1, len(scores)), 3)
+    pass_rate = round((len(examples) - failures) / len(examples), 3)
+    conn.execute(
+        "update agent_runs set status = 'completed', completed_at = ?, avg_score = ?, pass_rate = ?, failure_count = ?, latency_ms = ? where id = ?",
+        (now_ms(), avg_score, pass_rate, failures, round(total_latency / len(examples)), run_id),
+    )
+    conn.commit()
+    return run_id
+
+
+def run_agent_example(config, example, run_id):
+    started = now_ms()
+    code = generate_demo_agent_code(example, config["model"])
+    execution = execute_demo_python(code, config["timeout_seconds"])
+    passed_tests = execution["returncode"] == 0
+    safety_passed = all(blocked not in code for blocked in ("import os", "subprocess", "open(", "socket", "requests"))
+    completion_score = 0.84 if passed_tests else 0.58
+    if "local-buggy" in config["model"]:
+        completion_score = min(completion_score, 0.62)
+    safety_score = 0.96 if safety_passed else 0.3
+    efficiency_score = 0.9 if execution["duration_ms"] <= 900 else 0.68
+    tests_score = 0.95 if passed_tests else 0.35
+    scorer_results = [
+        {"scorer": "Unit tests pass", "score": tests_score, "passed": passed_tests, "rationale": "Focused demo test completed successfully." if passed_tests else "Focused demo test failed."},
+        {"scorer": "Task completion", "score": completion_score, "passed": completion_score >= 0.72, "rationale": "Agent produced a runnable solution and final answer."},
+        {"scorer": "Code safety", "score": safety_score, "passed": safety_passed, "rationale": "No blocked filesystem/network/process APIs were used."},
+        {"scorer": "Efficiency", "score": efficiency_score, "passed": efficiency_score >= 0.7, "rationale": f"Execution completed in {execution['duration_ms']}ms."},
+    ]
+    passed = all(item["passed"] for item in scorer_results)
+    trace = [
+        {"step": "read_task", "kind": "agent", "status": "completed", "message": example["input"], "durationMs": 24},
+        {"step": "write_solution", "kind": "code", "status": "completed", "message": "Agent wrote a small Python solution and focused assertion.", "durationMs": 138},
+        {"step": "execute_code", "kind": "tool", "status": "passed" if passed_tests else "failed", "message": execution["stdout"] or execution["stderr"], "durationMs": execution["duration_ms"]},
+        {"step": "score_trace", "kind": "scorer", "status": "completed", "message": "Deterministic agentic scorers evaluated tests, safety, completion, and efficiency.", "durationMs": 75},
+    ]
+    artifacts = [
+        {"name": "solution.py", "type": "code", "content": code},
+        {"name": "stdout.txt", "type": "log", "content": execution["stdout"]},
+        {"name": "stderr.txt", "type": "log", "content": execution["stderr"]},
+    ]
+    return {
+        "input": example["input"],
+        "expected": example["expected"],
+        "final_answer": "Agent completed the coding task and produced a runnable solution." if passed else "Agent run needs review before acceptance.",
+        "code": code,
+        "stdout": execution["stdout"],
+        "stderr": execution["stderr"],
+        "trace": trace,
+        "scorer_results": scorer_results,
+        "artifacts": artifacts,
+        "latency_ms": max(1, now_ms() - started + execution["duration_ms"]),
+        "passed": passed,
+    }
+
+
+def generate_demo_agent_code(example, model):
+    task = f"{example['input']} {example['expected']}".lower()
+    if "dedupe" in task or "email" in task:
+        return """def dedupe_by_email(records):
+    seen = set()
+    output = []
+    for record in records:
+        email = record.get("email", "").lower()
+        if email and email not in seen:
+            seen.add(email)
+            output.append(record)
+    return output
+
+rows = [{"email": "a@example.com"}, {"email": "A@example.com"}, {"email": "b@example.com"}]
+assert dedupe_by_email(rows) == [{"email": "a@example.com"}, {"email": "b@example.com"}]
+print("demo tests passed: dedupe_by_email")
+"""
+    if "json" in task:
+        return """import json
+
+def invoice_to_json(vendor, amount):
+    return {"vendor": vendor, "amount": float(amount)}
+
+payload = invoice_to_json("Acme", "42.50")
+assert json.dumps(payload)
+assert payload["vendor"] == "Acme"
+print("demo tests passed: valid invoice json")
+"""
+    if "local-buggy" in model:
+        return """def solve_task(text):
+    return ""
+
+assert solve_task("task")
+print("demo tests passed")
+"""
+    return """def solve_task(text):
+    cleaned = " ".join(text.split())
+    return {"summary": cleaned[:120], "status": "ok"}
+
+result = solve_task("Customer asks why their subscription renewal failed.")
+assert result["status"] == "ok"
+assert result["summary"]
+print("demo tests passed: generic coding helper")
+"""
+
+
+def execute_demo_python(code, timeout_seconds):
+    started = now_ms()
+    with tempfile.TemporaryDirectory(prefix="agentic-eval-") as tmpdir:
+        path = Path(tmpdir) / "solution.py"
+        path.write_text(code, encoding="utf-8")
+        try:
+            completed = subprocess.run(
+                ["python3", str(path)],
+                cwd=tmpdir,
+                capture_output=True,
+                text=True,
+                timeout=max(1, min(int(timeout_seconds), 10)),
+            )
+            return {
+                "returncode": completed.returncode,
+                "stdout": completed.stdout.strip(),
+                "stderr": completed.stderr.strip(),
+                "duration_ms": max(1, now_ms() - started),
+            }
+        except subprocess.TimeoutExpired as exc:
+            return {
+                "returncode": 124,
+                "stdout": (exc.stdout or "").strip() if isinstance(exc.stdout, str) else "",
+                "stderr": "Demo sandbox timed out.",
+                "duration_ms": max(1, now_ms() - started),
+            }
+
+
 def normalize_judge_scorers(payload):
     scorers = payload.get("scorers")
     if not isinstance(scorers, list) or not scorers:
@@ -983,6 +1361,28 @@ class Handler(SimpleHTTPRequestHandler):
             except ValueError as exc:
                 self.send_json({"error": str(exc)}, 400)
             return
+        if parsed.path == "/api/agent-configs":
+            length = int(self.headers.get("Content-Length", "0"))
+            payload = json.loads(self.rfile.read(length) or "{}")
+            try:
+                with connect() as conn:
+                    config_id = create_agent_config(conn, payload)
+                    config = conn.execute("select * from agent_configs where id = ?", (config_id,)).fetchone()
+                self.send_json(row_to_dict(config), 201)
+            except ValueError as exc:
+                self.send_json({"error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/agent-runs":
+            length = int(self.headers.get("Content-Length", "0"))
+            payload = json.loads(self.rfile.read(length) or "{}")
+            try:
+                with connect() as conn:
+                    run_id = create_agent_run(conn, payload)
+                    run = get_agent_run(conn, run_id)
+                self.send_json(run, 201)
+            except ValueError as exc:
+                self.send_json({"error": str(exc)}, 400)
+            return
         if parsed.path.startswith("/api/judge-runs/"):
             length = int(self.headers.get("Content-Length", "0"))
             payload = json.loads(self.rfile.read(length) or "{}")
@@ -1083,6 +1483,15 @@ class Handler(SimpleHTTPRequestHandler):
             elif parsed.path.startswith("/api/judge-runs/"):
                 judge_run_id = parsed.path.split("/")[-1]
                 self.send_json(get_judge_run(conn, judge_run_id))
+            elif parsed.path == "/api/agent-configs":
+                rows = conn.execute("select * from agent_configs order by created_at desc").fetchall()
+                self.send_json([row_to_dict(row) for row in rows])
+            elif parsed.path == "/api/agent-runs":
+                rows = conn.execute("select * from agent_runs order by created_at desc").fetchall()
+                self.send_json([row_to_dict(row) for row in rows])
+            elif parsed.path.startswith("/api/agent-runs/"):
+                run_id = parsed.path.split("/")[-1]
+                self.send_json(get_agent_run(conn, run_id))
             else:
                 self.send_error(404)
 
@@ -1140,6 +1549,15 @@ def get_judge_run(conn, judge_run_id):
         (judge_run_id,),
     ).fetchall()
     return {"judgeRun": row_to_dict(judge_run), "results": [row_to_dict(row) for row in rows]}
+
+
+def get_agent_run(conn, run_id):
+    run = conn.execute("select * from agent_runs where id = ?", (run_id,)).fetchone()
+    if not run:
+        raise ValueError("Agent run not found.")
+    config = conn.execute("select * from agent_configs where id = ?", (run["config_id"],)).fetchone()
+    rows = conn.execute("select * from agent_results where agent_run_id = ? order by id", (run_id,)).fetchall()
+    return {"agentRun": row_to_dict(run), "config": row_to_dict(config), "results": [row_to_dict(row) for row in rows]}
 
 
 def make_summary(runs):

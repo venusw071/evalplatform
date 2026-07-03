@@ -935,6 +935,57 @@ h3 {
   padding-top: 16px;
 }
 
+.agentic-layout {
+  align-items: start;
+}
+
+.agentic-switch-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.agentic-switch-grid label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfc;
+  padding: 10px;
+  color: var(--ink);
+}
+
+.agentic-switch-grid input {
+  width: auto;
+  min-height: auto;
+}
+
+.trace-list,
+.artifact-list {
+  display: grid;
+  gap: 8px;
+}
+
+.trace-step {
+  display: grid;
+  grid-template-columns: auto minmax(120px, 0.35fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 9px;
+}
+
+.trace-message {
+  min-width: 0;
+}
+
+.trace-message .expand-cell {
+  margin-bottom: 6px;
+}
+
 .judge-run-row span {
   color: var(--muted);
   font-size: 12px;
@@ -1049,7 +1100,7 @@ textarea {
   }
 
   .nav {
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(6, 1fr);
   }
 
   .sidebar-note {
@@ -1099,6 +1150,10 @@ textarea {
   .judge-lab-layout {
     grid-template-columns: minmax(0, 1.08fr) minmax(320px, 0.92fr);
   }
+
+  .agentic-layout {
+    grid-template-columns: minmax(0, 1.08fr) minmax(320px, 0.92fr);
+  }
 }
 
 @media (max-width: 680px) {
@@ -1111,5 +1166,10 @@ textarea {
   .judge-action-bar .primary-button,
   .judge-connect-button {
     width: 100%;
+  }
+
+  .agentic-switch-grid,
+  .trace-step {
+    grid-template-columns: 1fr;
   }
 }
